@@ -119,6 +119,7 @@ IMPORTANT RULES:
 - Ensure all monetary values ("Debit", "Credit", "Balance") are represented strictly as numbers (e.g., 1234.56, not "1,234.56"). Remove any commas or currency symbols.
 - If a transaction is clearly a credit, the "Debit" value MUST be null.
 - If a transaction is clearly a debit, the "Credit" value MUST be null.
+- Pay close attention to lines with the same date and reference number. If the narration and balance change indicate distinct events (e.g., an interest credit followed by a tax debit), treat them as separate transactions, even if the reference number is identical.
 - ONLY include rows that are clearly individual transactions. Do not include summaries.
 - Do NOT include any introductory text, explanations, or markdown fences (like \`\`\`json) in your response.
 - Provide ONLY the JSON array.
