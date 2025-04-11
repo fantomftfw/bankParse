@@ -162,8 +162,8 @@
     - [ ] Modify `aiProcessor` to select prompt from DB based on Bank ID (fallback to default)
 
 23. **Frontend - Integration**
-    - [ ] Pass `run_id` from `App.js` to `EditableDataTable`
-    - [ ] Send `run_id` with `/api/feedback` request
+    - [X] Pass `run_id` from `App.js` to `EditableDataTable`
+    - [X] Send `run_id` with `/api/feedback` request
     - [ ] Add UI for Bank Selection (e.g., dropdown in `App.js`)
     - [ ] Pass selected Bank ID from Frontend to Backend during conversion request
 

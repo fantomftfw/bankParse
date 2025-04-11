@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './EditableDataTable.css'; // We'll create this for styling
 
-function EditableDataTable({ data }) {
+function EditableDataTable({ data, runId }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25); // Default rows per page
   // State to hold the potentially edited data
@@ -85,11 +85,15 @@ function EditableDataTable({ data }) {
 
   // --- Feedback Logic ---
   const handleFeedbackSubmit = async () => {
-    if (isSubmittingFeedback) return;
+    if (isSubmittingFeedback || !runId) {
+        console.warn('Feedback submission attempted without runId.');
+        setFeedbackStatus('Cannot submit feedback: Missing processing run ID.');
+        return;
+    }
 
     setIsSubmittingFeedback(true);
     setFeedbackStatus('Submitting feedback...');
-    setEditingCell(null); // Ensure no cell is being edited during submit
+    setEditingCell(null);
 
     try {
       const API_BASE_URL = process.env.REACT_APP_API_URL || '';
@@ -98,7 +102,10 @@ function EditableDataTable({ data }) {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ correctedData: editedData }), // Send the entire edited data
+        body: JSON.stringify({ 
+            runId: runId, 
+            correctedData: editedData 
+        }), 
       });
 
       const result = await response.json();
@@ -202,7 +209,7 @@ function EditableDataTable({ data }) {
       <div className="feedback-section">
          <button 
            onClick={handleFeedbackSubmit} 
-           disabled={isSubmittingFeedback || editedData.length === 0}
+           disabled={isSubmittingFeedback || editedData.length === 0 || !runId}
          >
            {isSubmittingFeedback ? 'Submitting...' : 'Submit Corrections as Feedback'}
          </button>

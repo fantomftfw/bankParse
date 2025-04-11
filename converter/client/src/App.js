@@ -9,6 +9,7 @@ function App() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [fullTransactionData, setFullTransactionData] = useState([]);
   const [downloadId, setDownloadId] = useState(null);
+  const [currentRunId, setCurrentRunId] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [status, setStatus] = useState({ message: 'Please select a PDF file.', type: 'info' });
 
@@ -16,6 +17,7 @@ function App() {
     setSelectedFile(file);
     setFullTransactionData([]);
     setDownloadId(null);
+    setCurrentRunId(null);
     if (file) {
       setStatus({ message: `Selected: ${file.name}. Ready to convert.`, type: 'info' });
     } else {
@@ -28,6 +30,7 @@ function App() {
 
     setFullTransactionData([]);
     setDownloadId(null);
+    setCurrentRunId(null);
     setStatus({ message: 'Starting conversion...', type: 'loading' });
     setIsProcessing(true);
 
@@ -53,12 +56,14 @@ function App() {
       setStatus({ message: result.message || 'Processing complete!', type: 'success' });
       setFullTransactionData(result.fullTransactions || []);
       setDownloadId(result.downloadId || null);
+      setCurrentRunId(result.runId || null);
 
     } catch (error) {
       console.error('Conversion Error:', error);
       setStatus({ message: `Error: ${error.message}`, type: 'error' });
       setFullTransactionData([]);
       setDownloadId(null);
+      setCurrentRunId(null);
     } finally {
       setIsProcessing(false);
     }
@@ -82,7 +87,7 @@ function App() {
       <StatusMessage message={status.message} type={status.type} />
 
       {fullTransactionData.length > 0 && !isProcessing && (
-         <EditableDataTable data={fullTransactionData} />
+         <EditableDataTable data={fullTransactionData} runId={currentRunId} />
       )}
 
       {downloadId && !isProcessing && (
