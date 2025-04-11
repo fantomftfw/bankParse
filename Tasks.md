@@ -55,7 +55,7 @@
    - [X] Implement data preview functionality (in App.js and TransactionPreview.js)
    - [X] Create error handling logic (Basic try/catch in App.js)
    - [X] Implement inline editing in data table
-   - [In Progress] Implement feedback submission mechanism
+   - [X] Implement feedback submission mechanism
 
 ## Backend Development
 
@@ -144,3 +144,31 @@
     - [ ] Analyze extraction accuracy
     - [ ] Identify improvement opportunities
     - [ ] Plan for feature enhancements
+
+## Phase 2: Self-Improving Engine & Prompt Management (New Section)
+
+21. **Backend - Feedback Storage Infrastructure**
+    - [X] Choose & Setup Database (e.g., Render PostgreSQL)
+    - [X] Configure DB Connection in Backend
+    - [X] Define DB Schema: `FeedbackSubmissions`
+    - [X] Define DB Schema: `ProcessingResults` (to store initial AI output)
+    - [X] Modify `/api/upload` to generate `run_id`, store `ProcessingResults`, return `run_id`
+    - [X] Modify `/api/feedback` to require `run_id` and store feedback linked to run
+
+22. **Backend - Prompt Gallery Infrastructure**
+    - [X] Define DB Schema: `Prompts` (bank_identifier, text, version, etc.)
+    - [ ] Implement Basic CRUD API for Prompts (Optional - for manual management)
+    - [ ] Design Bank Identification Strategy (e.g., User Input, Filename Parsing)
+    - [ ] Modify `aiProcessor` to select prompt from DB based on Bank ID (fallback to default)
+
+23. **Frontend - Integration**
+    - [ ] Pass `run_id` from `App.js` to `EditableDataTable`
+    - [ ] Send `run_id` with `/api/feedback` request
+    - [ ] Add UI for Bank Selection (e.g., dropdown in `App.js`)
+    - [ ] Pass selected Bank ID from Frontend to Backend during conversion request
+
+24. **Backend - Feedback Analysis & Prompt Refinement (Future)**
+    - [ ] Implement comparison logic between initial result and feedback
+    - [ ] Develop metrics for prompt performance tracking
+    - [ ] Implement prompt ranking logic
+    - [ ] Research/Implement automatic prompt generation/refinement techniques

@@ -5,6 +5,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const pdf = require('pdf-parse'); // Require pdf-parse at the top
+const db = require('./db'); // Import the db utility
 
 // Import AI processing logic
 const { extractTransactionsWithAI } = require('./aiProcessor');
@@ -102,15 +103,15 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
         return res.status(400).json({ error: 'No file uploaded or file type invalid.' });
     }
     console.log('File uploaded:', req.file.path);
+    console.log('Original filename:', req.file.originalname);
 
-    let allTransactions = []; // Array to hold transactions from all pages
-    let extractionMethod = 'ai'; // Assume AI first
+    let allTransactions = [];
+    let extractionMethod = 'ai';
+    let pagesTextArray = []; // Keep track of pages for response message
 
     try {
         const dataBuffer = fs.readFileSync(req.file.path);
-
-        // Extract text page by page
-        const pagesTextArray = await getTextPerPage(dataBuffer);
+        pagesTextArray = await getTextPerPage(dataBuffer);
 
         if (!pagesTextArray || pagesTextArray.length === 0) {
              console.error('Failed to extract any text from PDF pages.');
@@ -174,6 +175,42 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
              return res.status(400).json({ error: 'Could not extract transactions from the document after all attempts.' });
         }
 
+        // --- Store result and get run ID --- 
+        let runId = null;
+        if (allTransactions.length > 0) {
+            try {
+                // Separate flags from data for clarity in DB
+                const flagsRaised = allTransactions.map((tx, index) => ({
+                    index: index,
+                    balanceMismatch: tx.balanceMismatch || false,
+                    correctedType: tx.correctedType || false,
+                    invalidStructure: tx.invalidStructure || false
+                })).filter(f => f.balanceMismatch || f.correctedType || f.invalidStructure);
+
+                const insertQuery = `
+                    INSERT INTO ProcessingResults 
+                    (original_pdf_name, initial_ai_result_json, flags_raised_json)
+                    VALUES ($1, $2, $3)
+                    RETURNING id;
+                `;
+                const values = [
+                    req.file.originalname, // Store original name
+                    JSON.stringify(allTransactions),
+                    JSON.stringify(flagsRaised)
+                ];
+                
+                console.log('Storing processing result in database...');
+                const dbResult = await db.query(insertQuery, values);
+                runId = dbResult.rows[0].id;
+                console.log(`Stored result with run_id: ${runId}`);
+
+            } catch (dbError) {
+                console.error('Error saving processing result to database:', dbError);
+                // Decide if this should be a fatal error for the request
+                // For now, log it but allow CSV generation/download to proceed
+            }
+        }
+
         // --- CSV Generation (Task 11) ---
         // Use a portion of the original PDF filename for the CSV ID
         const baseFileId = path.basename(req.file.filename, path.extname(req.file.filename));
@@ -187,7 +224,8 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
             transactions: allTransactions.slice(0, 5), // Keep preview for potential UI element
             fullTransactions: allTransactions, // Send the complete data
             totalTransactions: allTransactions.length,
-            downloadId: downloadId
+            downloadId: downloadId,
+            runId: runId // Include the run ID in the response
         });
 
     } catch (processingError) {
@@ -224,27 +262,48 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
 });
 
 // --- Feedback Submission Route ---
-app.post('/api/feedback', (req, res) => {
+app.post('/api/feedback', async (req, res) => { // Make async
   console.log('[Feedback Received] Received feedback data:');
-  // In a real app, validate req.body.correctedData here
-  if (!req.body || !req.body.correctedData || !Array.isArray(req.body.correctedData)) {
-    console.error('[Feedback Received] Invalid or missing feedback data.');
+  
+  // Extract runId and correctedData from request body
+  const { runId, correctedData } = req.body;
+
+  // Validate input
+  if (!runId) {
+      console.error('[Feedback Received] Missing runId.');
+      return res.status(400).json({ error: 'Missing runId in feedback data.' });
+  }
+  if (!correctedData || !Array.isArray(correctedData)) {
+    console.error('[Feedback Received] Invalid or missing correctedData.');
     return res.status(400).json({ error: 'Invalid feedback data format.' });
   }
   
-  const correctedData = req.body.correctedData;
-  console.log(`  -> Received ${correctedData.length} rows.`);
-  // Limit logging if data is very large
-  if (correctedData.length < 50) { 
-     console.log(JSON.stringify(correctedData, null, 2)); // Pretty print for readability
-  } else {
-     console.log(`  -> (Data too large to log fully)`);
-  }
+  console.log(`  -> Received ${correctedData.length} rows for runId: ${runId}`);
+  
+  try {
+      // Store feedback linked to the runId
+      const insertQuery = `
+          INSERT INTO FeedbackSubmissions (run_id, corrected_data_json)
+          VALUES ($1, $2)
+          RETURNING id;
+      `;
+      const values = [runId, JSON.stringify(correctedData)];
 
-  // TODO: Implement database saving logic here
-  // For now, just acknowledge receipt
-  console.log('[Feedback Received] Data logged. No database configured.');
-  res.status(200).json({ message: 'Feedback received successfully.' });
+      console.log('Storing feedback submission in database...');
+      const dbResult = await db.query(insertQuery, values);
+      const feedbackId = dbResult.rows[0].id;
+      console.log(`Stored feedback with id: ${feedbackId}`);
+
+      res.status(200).json({ message: 'Feedback received successfully.', feedbackId: feedbackId });
+
+  } catch (dbError) {
+      console.error('Error saving feedback submission to database:', dbError);
+      // Check for foreign key constraint violation (invalid runId)
+      if (dbError.code === '23503') { // PostgreSQL foreign key violation code
+          return res.status(400).json({ error: `Invalid runId: ${runId}` });
+      }
+      res.status(500).json({ error: 'Failed to store feedback.' });
+  }
 });
 
 // --- CSV Download Route (Task 11) ---
