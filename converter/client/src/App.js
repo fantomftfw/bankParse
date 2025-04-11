@@ -8,7 +8,6 @@ import EditableDataTable from './components/EditableDataTable';
 function App() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [fullTransactionData, setFullTransactionData] = useState([]);
-  const [totalCount, setTotalCount] = useState(0);
   const [downloadId, setDownloadId] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [status, setStatus] = useState({ message: 'Please select a PDF file.', type: 'info' });
@@ -16,7 +15,6 @@ function App() {
   const handleFileSelected = (file) => {
     setSelectedFile(file);
     setFullTransactionData([]);
-    setTotalCount(0);
     setDownloadId(null);
     if (file) {
       setStatus({ message: `Selected: ${file.name}. Ready to convert.`, type: 'info' });
@@ -29,7 +27,6 @@ function App() {
     if (!selectedFile || isProcessing) return;
 
     setFullTransactionData([]);
-    setTotalCount(0);
     setDownloadId(null);
     setStatus({ message: 'Starting conversion...', type: 'loading' });
     setIsProcessing(true);
@@ -55,14 +52,12 @@ function App() {
 
       setStatus({ message: result.message || 'Processing complete!', type: 'success' });
       setFullTransactionData(result.fullTransactions || []);
-      setTotalCount(result.totalTransactions || 0);
       setDownloadId(result.downloadId || null);
 
     } catch (error) {
       console.error('Conversion Error:', error);
       setStatus({ message: `Error: ${error.message}`, type: 'error' });
       setFullTransactionData([]);
-      setTotalCount(0);
       setDownloadId(null);
     } finally {
       setIsProcessing(false);
