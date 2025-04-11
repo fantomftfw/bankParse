@@ -14,7 +14,7 @@ const genAI = new GoogleGenerativeAI(API_KEY);
 
 // Model for main transaction extraction (Pro recommended for accuracy)
 const extractionModel = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash-001", 
+    model: "gemini-1.5-pro", // Revert back to the stable Pro model
     generationConfig: { responseMimeType: "application/json" },
     safetySettings: [ // Configure safety settings
         { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
