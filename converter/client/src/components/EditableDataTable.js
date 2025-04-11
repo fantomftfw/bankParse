@@ -14,12 +14,13 @@ function EditableDataTable({ data, runId }) {
 
   // Effect to update local state when data prop changes
   useEffect(() => {
+    console.log('[EditableDataTable] Received runId prop:', runId);
     setEditedData(data); // Initialize/reset local state with prop data
     setCurrentPage(1); // Reset page on new data
     setEditingCell(null); // Cancel any active edit
     setFeedbackStatus(''); // Reset feedback status on new data
     setIsSubmittingFeedback(false);
-  }, [data]);
+  }, [data, runId]);
 
   if (!editedData || editedData.length === 0) {
     return <p>No transaction data to display.</p>;
@@ -85,6 +86,7 @@ function EditableDataTable({ data, runId }) {
 
   // --- Feedback Logic ---
   const handleFeedbackSubmit = async () => {
+    console.log('[EditableDataTable] handleFeedbackSubmit called. Current runId:', runId);
     if (isSubmittingFeedback || !runId) {
         console.warn('Feedback submission attempted without runId.');
         setFeedbackStatus('Cannot submit feedback: Missing processing run ID.');

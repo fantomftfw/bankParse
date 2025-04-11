@@ -57,6 +57,7 @@ function App() {
       setFullTransactionData(result.fullTransactions || []);
       setDownloadId(result.downloadId || null);
       setCurrentRunId(result.runId || null);
+      console.log('[App.js] Received runId from API:', result.runId);
 
     } catch (error) {
       console.error('Conversion Error:', error);
