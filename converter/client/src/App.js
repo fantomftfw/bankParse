@@ -4,22 +4,40 @@ import FileUpload from './components/FileUpload';
 import TransactionPreview from './components/TransactionPreview';
 import DownloadButton from './components/DownloadButton';
 import StatusMessage from './components/StatusMessage';
+// TODO: Import EditableDataTable component later
 
 function App() {
-  useState(null); // Removed unused file state and setter completely
-  const [transactions, setTransactions] = useState([]); // Store preview transactions
-  const [totalCount, setTotalCount] = useState(0); // Total transactions found
-  const [downloadId, setDownloadId] = useState(null); // ID for downloading CSV
-  const [isProcessing, setIsProcessing] = useState(false); // Loading state
-  const [status, setStatus] = useState({ message: '', type: 'info' }); // { message: string, type: 'info' | 'error' | 'success' | 'loading' }
+  const [selectedFile, setSelectedFile] = useState(null);
+  // Store full transaction data for editing/display
+  const [fullTransactionData, setFullTransactionData] = useState([]); 
+  // Keep preview state for initial feedback?
+  const [previewTransactions, setPreviewTransactions] = useState([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [downloadId, setDownloadId] = useState(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [status, setStatus] = useState({ message: 'Please select a PDF file.', type: 'info' });
 
-  const handleFileUpload = async (selectedFile) => {
-    if (isProcessing) return;
-
-    setTransactions([]);
+  const handleFileSelected = (file) => {
+    setSelectedFile(file);
+    setPreviewTransactions([]);
+    setFullTransactionData([]); // Reset full data
     setTotalCount(0);
     setDownloadId(null);
-    setStatus({ message: `Selected: ${selectedFile.name}`, type: 'info' });
+    if (file) {
+      setStatus({ message: `Selected: ${file.name}. Ready to convert.`, type: 'info' });
+    } else {
+      setStatus({ message: 'Please select a PDF file.', type: 'info' });
+    }
+  };
+
+  const handleConvert = async () => {
+    if (!selectedFile || isProcessing) return;
+
+    setPreviewTransactions([]);
+    setFullTransactionData([]); // Reset full data
+    setTotalCount(0);
+    setDownloadId(null);
+    setStatus({ message: 'Starting conversion...', type: 'loading' });
     setIsProcessing(true);
 
     const formData = new FormData();
@@ -28,10 +46,8 @@ function App() {
     try {
       setStatus({ message: 'Uploading and processing file...', type: 'loading' });
 
-      // Define base URL from environment variable
       const API_BASE_URL = process.env.REACT_APP_API_URL || ''; 
 
-      // Make API call using fetch (or Axios if installed)
       const response = await fetch(`${API_BASE_URL}/api/upload`, {
         method: 'POST',
         body: formData,
@@ -40,21 +56,21 @@ function App() {
       const result = await response.json();
 
       if (!response.ok) {
-        // Handle API errors (e.g., 400, 500)
         throw new Error(result.error || `HTTP error! status: ${response.status}`);
       }
 
-      // Success
+      // Store both preview and full data
       setStatus({ message: result.message || 'Processing complete!', type: 'success' });
-      setTransactions(result.transactions || []);
+      setPreviewTransactions(result.transactions || []); 
+      setFullTransactionData(result.fullTransactions || []); // Store the full data
       setTotalCount(result.totalTransactions || 0);
       setDownloadId(result.downloadId || null);
 
     } catch (error) {
-      console.error('Upload/Processing Error:', error);
+      console.error('Conversion Error:', error);
       setStatus({ message: `Error: ${error.message}`, type: 'error' });
-      // Clear results on error
-      setTransactions([]);
+      setPreviewTransactions([]);
+      setFullTransactionData([]); // Reset full data
       setTotalCount(0);
       setDownloadId(null);
     } finally {
@@ -66,14 +82,39 @@ function App() {
     <div className="App">
       <h1>Bank Statement to CSV Converter</h1>
 
-      {/* Pass state and handlers to components */}
-      <FileUpload onFileUpload={handleFileUpload} isProcessing={isProcessing} />
+      {/* Step 1: File Selection */}
+      <FileUpload onFileSelected={handleFileSelected} isProcessing={isProcessing} />
 
+      {/* Step 2: Convert Button (only show if a file is selected) */}
+      {selectedFile && (
+        <div style={{ marginTop: '20px' }}>
+          <h2>2. Convert File</h2>
+          <button onClick={handleConvert} disabled={isProcessing}>
+            {isProcessing ? 'Processing...' : 'Convert to CSV'}
+          </button>
+        </div>
+      )}
+
+      {/* Step 3: Status & Results */}
       <StatusMessage message={status.message} type={status.type} />
 
-      <TransactionPreview transactions={transactions} totalCount={totalCount} />
+      {/* TODO: Show EditableDataTable instead of TransactionPreview when full data is available */}
+      {/* Replace this preview logic later */}
+      {previewTransactions.length > 0 && !isProcessing && (
+        <TransactionPreview transactions={previewTransactions} totalCount={totalCount} />
+      )}
 
-      <DownloadButton downloadId={downloadId} isProcessing={isProcessing} />
+      {/* Render EditableDataTable when data is ready */}
+      {fullTransactionData.length > 0 && !isProcessing && (
+         // TODO: Create and use the EditableDataTable component
+         <p>Editable Data Table will go here ({fullTransactionData.length} rows)</p>
+         // <EditableDataTable data={fullTransactionData} /> 
+      )}
+
+      {/* Keep download button for now */}
+      {downloadId && (
+         <DownloadButton downloadId={downloadId} isProcessing={isProcessing} />
+      )}
 
     </div>
   );

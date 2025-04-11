@@ -178,14 +178,16 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
         // Use a portion of the original PDF filename for the CSV ID
         const baseFileId = path.basename(req.file.filename, path.extname(req.file.filename));
         const csvFilePath = await generateCsv(allTransactions, baseFileId);
-        const downloadId = path.basename(csvFilePath); // Just the filename e.g., file-123.csv
+        const downloadId = path.basename(csvFilePath);
 
-        // Send back preview and total count (as per PRD)
+        // --- Response --- 
+        // Send back the full list and the preview
         res.status(200).json({
             message: `File processed successfully (using ${extractionMethod}). Processed ${pagesTextArray.length} pages.`,
-            transactions: allTransactions.slice(0, 5), // Preview first 5 of combined list
+            transactions: allTransactions.slice(0, 5), // Keep preview for potential UI element
+            fullTransactions: allTransactions, // Send the complete data
             totalTransactions: allTransactions.length,
-            downloadId: downloadId // Provide ID for download endpoint
+            downloadId: downloadId
         });
 
     } catch (processingError) {

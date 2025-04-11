@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-function FileUpload({ onFileUpload, isProcessing }) {
+function FileUpload({ onFileSelected, isProcessing }) {
   const [error, setError] = useState('');
 
   const MAX_FILE_SIZE_MB = 25;
@@ -18,6 +18,7 @@ function FileUpload({ onFileUpload, isProcessing }) {
         console.error(typeError);
         setError(typeError);
         event.target.value = null;
+        onFileSelected(null);
         return;
       }
 
@@ -26,20 +27,22 @@ function FileUpload({ onFileUpload, isProcessing }) {
         console.error(sizeError);
         setError(sizeError);
         event.target.value = null;
+        onFileSelected(null);
         return;
       }
 
       setError('');
-      onFileUpload(file);
+      onFileSelected(file);
     } else {
       event.target.value = null;
       setError('');
+      onFileSelected(null);
     }
   };
 
   return (
     <div>
-      <h2>1. Upload Bank Statement</h2>
+      <h2>1. Select Bank Statement PDF</h2>
       <input
         type="file"
         accept=".pdf"
