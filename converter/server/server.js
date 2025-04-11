@@ -20,8 +20,24 @@ const { extractTransactionsWithPatterns } = require('./patternExtractor');
 const app = express();
 const port = process.env.PORT || 5001; // Use 5001 to avoid potential conflicts with React's default 3000
 
+// --- CORS Configuration ---
+const allowedOrigins = ['http://localhost:3000', 'https://bankparser.netlify.app']; // Add your Netlify URL
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
+  optionsSuccessStatus: 200 // some legacy browsers (IE11, various SmartTVs) choke on 204
+};
+
 // Middleware
-app.use(cors()); // Allow requests from the React frontend
+app.use(cors(corsOptions)); // Use configured options
 app.use(express.json()); // Parse JSON bodies
 app.use(express.urlencoded({ extended: true })); // Parse URL-encoded bodies
 
