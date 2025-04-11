@@ -250,6 +250,7 @@ async function identifyBankWithAI(textContent) {
         if (bankName.toUpperCase().includes('ICICI')) return 'ICICI';
         if (bankName.toUpperCase().includes('HDFC')) return 'HDFC';
         if (bankName.toUpperCase().includes('SBI') || bankName.toUpperCase().includes('STATE BANK')) return 'SBI';
+        if (bankName.toUpperCase().includes('EQUITAS')) return 'EQUITAS'; // Add Equitas check
         // Add more specific bank standardizations here if needed
         
         // Return the cleaned name if it passed checks

@@ -3,8 +3,9 @@ const db = require('./db');
 // Define Prompts
 const defaultPromptText = `
 Analyze the following bank statement text and extract all transaction details.
-Focus ONLY on rows representing individual transactions with clear debit, credit, or balance changes.
-Ignore page headers, footers, summary lines, opening/closing balance summaries, or any text outside the main transaction list.
+Focus ONLY on rows representing individual transactions.
+Include the initial "Opening Balance" row if it appears as the first entry, even if Debit/Credit are zero or null.
+Ignore other summary lines, repeated headers, footers, or text outside the main transaction list.
 Format the output as a JSON array of objects. Each object MUST represent a single transaction
 and MUST contain the following keys EXACTLY:
 - "Serial no.": The transaction serial number or sequence identifier (string or null if not present).
@@ -40,8 +41,9 @@ Bank Statement Text:
 
 const iciciPromptText = `
 Analyze the following bank statement text and extract all transaction details.
-Focus ONLY on rows representing individual transactions with clear debit, credit, or balance changes.
-Ignore page headers, footers, summary lines, opening/closing balance summaries, or any text outside the main transaction list.
+Focus ONLY on rows representing individual transactions.
+Include the initial "Opening Balance" row if it appears as the first entry, even if Withdrawal/Deposit are zero or null.
+Ignore other summary lines, repeated headers, footers, or text outside the main transaction list.
 Format the output as a JSON array of objects. Each object MUST represent a single transaction
 and MUST contain the following keys EXACTLY, matching the structure of the target CSV:
 - "Sl No": The transaction serial number or sequence identifier (string or number, or null if not present).
@@ -76,6 +78,47 @@ IMPORTANT RULES:
 - If a transaction is a withdrawal, the "Deposit(Cr)" value MUST be null and "Withdrawal (Dr)" MUST be a positive number.
 - If a transaction is a deposit, the "Withdrawal (Dr)" value MUST be null and "Deposit(Cr)" MUST be a positive number.
 - Extract the data as accurately as possible from the text.
+- ONLY include rows that are clearly individual transactions. Do not include summaries.
+- Do NOT include any introductory text, explanations, or markdown fences (like \`\`\`json) in your response.
+- Provide ONLY the JSON array.
+
+Bank Statement Text:
+--- START ---
+\${textContent}
+--- END ---
+`;
+
+// Define Equitas Prompt
+const equitasPromptText = `
+Analyze the following bank statement text and extract all transaction details.
+Focus ONLY on rows representing individual transactions.
+Include the initial "Opening Balance" row if it appears as the first entry, even if Debit/Credit are zero or null.
+Ignore other summary lines, repeated headers, footers, or text outside the main transaction list.
+Format the output as a JSON array of objects. Each object MUST represent a single transaction
+and MUST contain the following keys EXACTLY, matching the structure of the Equitas statement:
+- "Transaction Date": The primary date of the transaction.
+- "Value Date": The value date if different from Transaction Date.
+- "Reference or cheque no": The reference or cheque number associated with the transaction (string or null).
+- "Narration": The full description or narration of the transaction (string).
+- "Debit": The amount debited (positive number or null if it's a credit).
+- "Credit": The amount credited (positive number or null if it's a debit).
+- "Balance": The account balance *after* this transaction (number).
+
+Example object (adjust values as needed):
+{
+  "Transaction Date": "10/Apr/2024",
+  "Value Date": "10/Apr/2024",
+  "Reference or cheque no": "REF12345",
+  "Narration": "Online Purchase Amazon",
+  "Debit": 1500.50,
+  "Credit": null,
+  "Balance": 25000.75
+}
+
+IMPORTANT RULES:
+- Ensure all monetary values ("Debit", "Credit", "Balance") are represented strictly as numbers (e.g., 1234.56, not "1,234.56"). Remove any commas or currency symbols.
+- If a transaction is clearly a credit, the "Debit" value MUST be null.
+- If a transaction is clearly a debit, the "Credit" value MUST be null.
 - ONLY include rows that are clearly individual transactions. Do not include summaries.
 - Do NOT include any introductory text, explanations, or markdown fences (like \`\`\`json) in your response.
 - Provide ONLY the JSON array.
@@ -140,6 +183,13 @@ const createTablesAndPrompts = async () => {
     ON CONFLICT (bank_identifier) DO NOTHING;
   `; // Use ON CONFLICT for ICICI
 
+  // Insert Equitas Prompt
+  const insertEquitasPrompt = `
+    INSERT INTO Prompts (bank_identifier, prompt_text, is_default, is_active, version)
+    VALUES ('EQUITAS', $1, false, true, 1)
+    ON CONFLICT (bank_identifier) DO NOTHING;
+  `; // Use ON CONFLICT for Equitas
+
   try {
     console.log('Creating uuid-ossp extension if not exists...');
     await db.query(enableUuidExtension);
@@ -175,6 +225,8 @@ const createTablesAndPrompts = async () => {
     await db.query(insertDefaultPrompt, [defaultPromptText]);
     console.log('Seeding ICICI prompt...');
     await db.query(insertIciciPrompt, [iciciPromptText]);
+    console.log('Seeding Equitas prompt...');
+    await db.query(insertEquitasPrompt, [equitasPromptText]);
 
     console.log('Database setup and seeding complete.');
   } catch (err) {

@@ -164,6 +164,7 @@
     - [X] Create `identifyBankWithAI` function
     - [X] Integrate `identifyBankWithAI` call into `/api/upload`
     - [X] Modify `aiProcessor` to select prompt from DB based on identified Bank ID (fallback to default)
+    - [X] Add specific prompts for ICICI and Equitas
 
 23. **Frontend - Integration**
     - [X] Pass `run_id` from `App.js` to `EditableDataTable`
