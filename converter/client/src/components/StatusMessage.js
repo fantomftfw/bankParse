@@ -9,7 +9,6 @@ function StatusMessage({ message, type = 'info' }) {
 
   const style = {
     padding: '10px',
-    margin: '10px 0',
     border: '1px solid',
     borderRadius: '4px',
     maxWidth: '600px', // Limit width
