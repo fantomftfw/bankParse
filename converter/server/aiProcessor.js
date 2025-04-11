@@ -11,9 +11,23 @@ if (!API_KEY) {
 
 // Initialize the Generative AI client
 const genAI = new GoogleGenerativeAI(API_KEY);
-const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-pro",
-    generationConfig: { responseMimeType: "application/json" }, // Request JSON output directly
+
+// Model for main transaction extraction (Pro recommended for accuracy)
+const extractionModel = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash-001", 
+    generationConfig: { responseMimeType: "application/json" },
+    safetySettings: [ // Configure safety settings
+        { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+        { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+        { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+        { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+    ]
+});
+
+// Separate, faster model for bank identification
+const identificationModel = genAI.getGenerativeModel({
+    model: "gemini-1.5-flash", // Use flash for speed
+    // No specific responseMimeType needed, expect simple text
     safetySettings: [ // Configure safety settings
         { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
         { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
@@ -193,66 +207,117 @@ function validateTransactionBalances(transactions) {
  }
 
 /**
+ * Attempts to identify the bank name from text using AI.
+ * @param {string} textContent Text from the first page (or relevant part) of the statement.
+ * @returns {Promise<string|null>} A promise resolving to the identified bank name (e.g., "ICICI", "HDFC") or null if identification fails.
+ */
+async function identifyBankWithAI(textContent) {
+    if (!textContent || textContent.trim().length < 50) { // Need some text to identify
+        console.warn('[Bank ID] Text content too short for reliable bank identification.');
+        return null;
+    }
+
+    // Limit text length to avoid excessive token usage for simple identification
+    const truncatedText = textContent.substring(0, 2000); // Use first 2000 chars
+
+    const prompt = `
+        Analyze the following text snippet from a bank statement.
+        Identify the primary bank name mentioned.
+        Respond with ONLY the common abbreviation or name of the bank (e.g., "ICICI", "HDFC", "SBI", "Bank of America", "Chase").
+        If you are unsure, respond with "Unknown".
+        Do not include any explanations or introductory text.
+
+        Text Snippet:
+        --- START ---
+        ${truncatedText}
+        --- END ---
+    `;
+
+    try {
+        console.log('[Bank ID] Sending request to Gemini AI for bank identification...');
+        const result = await identificationModel.generateContent(prompt);
+        const response = result.response;
+        const bankName = response.text().trim();
+
+        console.log(`[Bank ID] Received bank name guess: "${bankName}"`);
+
+        if (!bankName || bankName.toLowerCase() === 'unknown' || bankName.length > 50) { // Basic sanity checks
+            console.warn('[Bank ID] AI returned Unknown or invalid bank name.');
+            return null;
+        }
+
+        // Simple standardization (can be expanded)
+        if (bankName.toUpperCase().includes('ICICI')) return 'ICICI';
+        if (bankName.toUpperCase().includes('HDFC')) return 'HDFC';
+        if (bankName.toUpperCase().includes('SBI') || bankName.toUpperCase().includes('STATE BANK')) return 'SBI';
+        // Add more specific bank standardizations here if needed
+        
+        // Return the cleaned name if it passed checks
+        return bankName; 
+
+    } catch (error) {
+        console.error('[Bank ID] Error during AI bank identification:', error.message);
+        return null; // Return null on error
+    }
+}
+
+/**
  * Extracts transactions from bank statement text using the Gemini AI API.
- * @param {string} textContent The text content extracted from the PDF bank statement.
+ * It now fetches the appropriate prompt based on the identified bank.
+ * @param {string} textContent The text content extracted from the PDF bank statement page.
+ * @param {string|null} bankIdentifier The identified bank (e.g., 'ICICI', 'SBI') or null.
  * @returns {Promise<Array<object>>} A promise that resolves to an array of transaction objects.
  * @throws {Error} If AI processing fails or the response format is invalid.
  */
-async function extractTransactionsWithAI(textContent) {
+async function extractTransactionsWithAI(textContent, bankIdentifier) {
+    const db = require('./db'); // Require db here as needed
+    let promptToUse = '';
+    let promptId = null;
+
+    try {
+        // Fetch the appropriate prompt from the database
+        let promptResult;
+        if (bankIdentifier) {
+            console.log(`[AI Extract] Attempting to find prompt for bank: ${bankIdentifier}`);
+            promptResult = await db.query(
+                'SELECT id, prompt_text FROM Prompts WHERE bank_identifier = $1 AND is_active = true ORDER BY version DESC LIMIT 1',
+                [bankIdentifier]
+            );
+        }
+
+        // If no bank-specific prompt found, get the default
+        if (!promptResult || promptResult.rows.length === 0) {
+            console.log(`[AI Extract] No specific prompt found for ${bankIdentifier || 'N/A'}. Using default.`);
+            promptResult = await db.query(
+                'SELECT id, prompt_text FROM Prompts WHERE is_default = true AND is_active = true ORDER BY version DESC LIMIT 1'
+            );
+        }
+
+        if (promptResult.rows.length > 0) {
+            promptToUse = promptResult.rows[0].prompt_text;
+            promptId = promptResult.rows[0].id;
+            console.log(`[AI Extract] Using prompt ID: ${promptId}`);
+            // Inject the textContent into the prompt template
+            promptToUse = promptToUse.replace('\${textContent}', textContent); 
+        } else {
+            console.error('[AI Extract] CRITICAL: No active default prompt found in database!');
+            throw new Error('No suitable extraction prompt found.');
+        }
+
+    } catch (dbError) {
+        console.error('[AI Extract] Error fetching prompt from database:', dbError);
+        throw new Error('Failed to retrieve extraction prompt.');
+    }
+    
     if (!textContent) {
         console.warn("AI Processor: Received empty text content.");
         return [];
     }
 
-    // Updated prompt asking for specific columns and JSON format based on correct.csv
-    const prompt = `
-        Analyze the following bank statement text and extract all transaction details.
-        Format the output as a JSON array of objects. Each object MUST represent a single transaction
-        and MUST contain the following keys EXACTLY, matching the structure of the target CSV:
-        - "Sl No": The transaction serial number or sequence identifier (string or number, or null if not present).
-        - "Tran Id": The transaction ID string (string or null if not present).
-        - "Value Date": The value date of the transaction (use DD/Mon/YYYY format if possible, otherwise keep original string).
-        - "Transaction Date": The transaction date (use DD/Mon/YYYY format if possible, otherwise keep original string).
-        - "Transaction Posted": The date and time the transaction was posted (string or null).
-        - "Cheque no /": The cheque number if applicable (string or null).
-        - "Ref No": The reference number if applicable (string or null).
-        - "Transaction Remarks": The full description/remarks of the transaction (string).
-        - "Withdrawal (Dr)": The withdrawal amount as a positive number (number or null if it's a deposit).
-        - "Deposit(Cr)": The deposit amount as a positive number (number or null if it's a withdrawal).
-        - "Balance": The account balance *after* this transaction (number).
-
-        Example object based on the target CSV structure:
-        {
-          "Sl No": 2,
-          "Tran Id": "S8016 8647",
-          "Value Date": "19/Jan/2025",
-          "Transaction Date": "19/Jan/2025",
-          "Transaction Posted": "19/01/2025 11:07:48 PM",
-          "Cheque no /": null,
-          "Ref No": null,
-          "Transaction Remarks": "UPI/291860937631/ Payment from Ph/abhishek.kurve./E QUITAS SMALL F/YBLd4b5d1bcf102 4fc7ae142b37fe4d9 91d",
-          "Withdrawal (Dr)": null,
-          "Deposit(Cr)": 2200,
-          "Balance": 2391.35
-        }
-
-        IMPORTANT RULES:
-        - Ensure all monetary values ("Withdrawal (Dr)", "Deposit(Cr)", "Balance") are represented strictly as numbers (e.g., 1234.56, not "1,234.56" or "$123.45"). Remove any commas or currency symbols.
-        - If a transaction is a withdrawal, the "Deposit(Cr)" value MUST be null and "Withdrawal (Dr)" MUST be a positive number.
-        - If a transaction is a deposit, the "Withdrawal (Dr)" value MUST be null and "Deposit(Cr)" MUST be a positive number.
-        - Extract the data as accurately as possible from the text.
-        - Do NOT include any introductory text, explanations, or markdown fences (like \`\`\`json) in your response.
-        - Provide ONLY the JSON array.
-
-        Bank Statement Text:
-        --- START ---
-        ${textContent}
-        --- END ---
-    `;
-
     try {
-        console.log("Sending request to Gemini AI...");
-        const result = await model.generateContent(prompt);
+        console.log('[AI Extract] Sending request to Gemini AI...');
+        // Use the PRO model for extraction
+        const result = await extractionModel.generateContent(promptToUse); 
         const response = result.response;
         const jsonText = response.text();
 
@@ -287,7 +352,10 @@ async function extractTransactionsWithAI(textContent) {
         const correctedCount = validatedTransactions.filter(tx => tx.correctedType).length;
         console.log(`Processed ${validatedTransactions.length} transactions. ${consistentTransactions.length} appear consistent. ${correctedCount} type misclassifications corrected.`);
 
-        return validatedTransactions; // Return all processed transactions
+        // Attach promptId to the result if needed downstream (e.g., for saving ProcessingResults)
+        // validatedTransactions = validatedTransactions.map(tx => ({ ...tx, _promptIdUsed: promptId }));
+
+        return validatedTransactions; 
 
     } catch (error) {
         // Log the specific error from the API call or parsing/validation
@@ -297,4 +365,4 @@ async function extractTransactionsWithAI(textContent) {
     }
 }
 
-module.exports = { extractTransactionsWithAI }; 
+module.exports = { identifyBankWithAI, extractTransactionsWithAI }; 

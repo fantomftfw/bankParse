@@ -8,7 +8,7 @@ const pdf = require('pdf-parse'); // Require pdf-parse at the top
 const db = require('./db'); // Import the db utility
 
 // Import AI processing logic
-const { extractTransactionsWithAI } = require('./aiProcessor');
+const { extractTransactionsWithAI, identifyBankWithAI } = require('./aiProcessor');
 // Import CSV generation logic
 const { generateCsv, csvExportsDir } = require('./csvGenerator'); // Import generateCsv
 // Import pattern extraction logic
@@ -107,7 +107,9 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
 
     let allTransactions = [];
     let extractionMethod = 'ai';
-    let pagesTextArray = []; // Keep track of pages for response message
+    let pagesTextArray = [];
+    let identifiedBank = null; // Variable to store identified bank
+    let promptIdUsed = null; // Variable to store prompt ID used
 
     try {
         const dataBuffer = fs.readFileSync(req.file.path);
@@ -118,7 +120,13 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
              return res.status(500).json({ error: 'Could not extract text from PDF.' });
         }
 
-        console.log(`Processing ${pagesTextArray.length} pages with AI...`);
+        // --- Identify Bank using First Page --- 
+        if (pagesTextArray[0]) {
+            identifiedBank = await identifyBankWithAI(pagesTextArray[0]);
+            console.log(`Identified Bank (or null): ${identifiedBank}`);
+        }
+
+        console.log(`Processing ${pagesTextArray.length} pages with AI (Bank: ${identifiedBank || 'Default'})...`);
 
         // --- Process each page with AI ---        
         for (let i = 0; i < pagesTextArray.length; i++) {
@@ -131,9 +139,19 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
             }
 
             try {
-                const transactionsFromPage = await extractTransactionsWithAI(pageText);
+                // Pass identified bank to extraction function
+                const transactionsFromPage = await extractTransactionsWithAI(pageText, identifiedBank); 
+                
+                // Store promptId if available (needs modification in extractTransactionsWithAI to return it - FUTURE)
+                // if (transactionsFromPage.length > 0 && transactionsFromPage[0]._promptIdUsed && !promptIdUsed) {
+                //     promptIdUsed = transactionsFromPage[0]._promptIdUsed; 
+                // }
+
                 if (transactionsFromPage && transactionsFromPage.length > 0) {
-                    allTransactions.push(...transactionsFromPage); // Append results
+                    // Remove internal _promptIdUsed before concatenating if added
+                    // const cleanedTransactions = transactionsFromPage.map(({ _promptIdUsed, ...rest }) => rest);
+                    // allTransactions.push(...cleanedTransactions);
+                    allTransactions.push(...transactionsFromPage);
                     console.log(`  -> Received ${transactionsFromPage.length} transactions from Page ${i + 1}. Total now: ${allTransactions.length}`);
                 } else {
                     console.log(`  -> No transactions returned from Page ${i + 1}.`);
@@ -189,14 +207,16 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
 
                 const insertQuery = `
                     INSERT INTO ProcessingResults 
-                    (original_pdf_name, initial_ai_result_json, flags_raised_json)
-                    VALUES ($1, $2, $3)
+                    (original_pdf_name, initial_ai_result_json, flags_raised_json, ai_model_used, prompt_used_id)
+                    VALUES ($1, $2, $3, $4, $5)
                     RETURNING id;
                 `;
                 const values = [
-                    req.file.originalname, // Store original name
+                    req.file.originalname, 
                     JSON.stringify(allTransactions),
-                    JSON.stringify(flagsRaised)
+                    JSON.stringify(flagsRaised),
+                    'gemini-1.5-pro', // Hardcode model for now, could get from aiProcessor later
+                    promptIdUsed // Store the ID of the prompt used (Needs to be passed back from extract) - currently null
                 ];
                 
                 console.log('Storing processing result in database...');

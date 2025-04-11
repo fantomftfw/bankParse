@@ -158,14 +158,16 @@
 22. **Backend - Prompt Gallery Infrastructure**
     - [X] Define DB Schema: `Prompts` (bank_identifier, text, version, etc.)
     - [ ] Implement Basic CRUD API for Prompts (Optional - for manual management)
-    - [ ] Design Bank Identification Strategy (e.g., User Input, Filename Parsing)
-    - [ ] Modify `aiProcessor` to select prompt from DB based on Bank ID (fallback to default)
+    - [X] Design Bank Identification Strategy (AI Classification)
+    - [X] Create `identifyBankWithAI` function
+    - [X] Integrate `identifyBankWithAI` call into `/api/upload`
+    - [X] Modify `aiProcessor` to select prompt from DB based on identified Bank ID (fallback to default)
 
 23. **Frontend - Integration**
     - [X] Pass `run_id` from `App.js` to `EditableDataTable`
     - [X] Send `run_id` with `/api/feedback` request
-    - [ ] Add UI for Bank Selection (e.g., dropdown in `App.js`)
-    - [ ] Pass selected Bank ID from Frontend to Backend during conversion request
+    - [-] Add UI for Bank Selection (Not needed if auto-detection works reliably)
+    - [-] Pass selected Bank ID from Frontend to Backend (Not needed if auto-detection works reliably)
 
 24. **Backend - Feedback Analysis & Prompt Refinement (Future)**
     - [ ] Implement comparison logic between initial result and feedback
