@@ -30,7 +30,7 @@ Provide ONLY the JSON array.
 
 Bank Statement Text:
 --- START ---
-${textContent}
+\${textContent}
 --- END ---
 `;
 
@@ -75,7 +75,7 @@ IMPORTANT RULES:
 
 Bank Statement Text:
 --- START ---
-${textContent}
+\${textContent}
 --- END ---
 `;
 
