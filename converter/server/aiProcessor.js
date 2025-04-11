@@ -384,6 +384,11 @@ async function extractTransactionsWithAI(textContent, bankIdentifier) {
         const jsonText = response.text();
 
         console.log("Received response from Gemini AI.");
+        
+        // --- Add Logging for Raw Response --- 
+        console.log(`\n--- Raw AI Response (Length: ${jsonText?.length}) ---\n${jsonText}\n---\n`);
+        // --- End Logging --- 
+        
         if (!jsonText) {
              console.error("AI response text is empty.");
              throw new Error("AI returned an empty response.");

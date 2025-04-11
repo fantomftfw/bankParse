@@ -77,28 +77,76 @@ const upload = multer({
 async function getTextPerPage(dataBuffer) {
     const pagesText = [];
     try {
-        await pdf(dataBuffer, {
+        const data = await pdf(dataBuffer, {
             pagerender: function(pageData) {
-                // The intent is to capture text per page.
-                // pdf-parse's pagerender gives page data; we process it.
                 return pageData.getTextContent({ normalizeWhitespace: true, disableCombineTextItems: false })
                     .then(function(textContent) {
-                        let lastY, text = '';
-                        // Simple line joining logic (may need refinement for complex layouts)
-                        for (let item of textContent.items) {
-                            if (lastY == item.transform[5] || !lastY){
-                                text += item.str + ' ';
+                        let text = '';
+                        if (!textContent || !textContent.items || textContent.items.length === 0) {
+                            return ''; // Return empty string if no items
+                        }
+
+                        let lastY = null;
+                        // Sort items primarily by Y coordinate, then X, to ensure correct reading order
+                        const sortedItems = textContent.items.sort((a, b) => {
+                            if (a.transform[5] < b.transform[5]) return -1; // Y coordinate (transform index 5)
+                            if (a.transform[5] > b.transform[5]) return 1;
+                            if (a.transform[4] < b.transform[4]) return -1; // X coordinate (transform index 4)
+                            if (a.transform[4] > b.transform[4]) return 1;
+                            return 0;
+                        });
+
+                        for (let item of sortedItems) {
+                            if (lastY !== null && item.transform[5] !== lastY) {
+                                // New line detected (Y coordinate changed)
+                                text += '\n' + item.str; 
                             } else {
-                                text += '\n' + item.str;
+                                // Same line or first item, add with space separator if not the very first char
+                                text += (text.length > 0 ? ' ' : '') + item.str;
                             }
                             lastY = item.transform[5];
                         }
-                        pagesText.push(text); // Add extracted text for the current page
+                        return text; // Return the constructed text for this page
                     });
             }
         });
-        console.log(`Extracted text from ${pagesText.length} pages.`);
-        return pagesText; // Return array of strings, one per page
+        // pdf() with pagerender doesn't directly return pagesText, we need data.text
+        // The pagerender function is called for each page, but the final result needs assembly.
+        // Let's rethink this - pdf-parse documentation is key here.
+        // A simpler approach might be needed if pagerender isn't accumulating correctly.
+
+        // Alternative: Process page by page using max argument (less reliable?)
+        /*
+        const numPages = data.numpages;
+        for (let i = 1; i <= numPages; i++) {
+            const pageData = await pdf(dataBuffer, { max: i }); // Get text up to page i
+            const prevPageData = await pdf(dataBuffer, { max: i - 1 }); // Get text up to page i-1
+            const pageText = pageData.text.substring(prevPageData.text.length);
+            pagesText.push(pageText);
+        }
+        */
+
+        // Let's stick with the idea of pagerender but ensure it collects properly.
+        // The previous implementation likely failed because pagerender promises weren't collected.
+        // We need to process data.metadata or data.info if available, or use a different strategy.
+        
+        // --- Corrected pagerender approach (Conceptual) ---
+        // This often requires a library structure or careful promise handling.
+        // For simplicity, let's try the less elegant page-by-page subtraction method.
+        console.log(`Attempting page text extraction for ${data.numpages} pages...`);
+        let previousText = '';
+        for (let i = 1; i <= data.numpages; i++) {
+             console.log(`  Extracting page ${i}...`);
+             // Rerun pdf-parse limiting pages - this is inefficient but simpler
+             let currentPageData = await pdf(dataBuffer, { max: i });
+             let pageText = currentPageData.text.substring(previousText.length);
+             pagesText.push(pageText);
+             previousText = currentPageData.text; // Update text processed so far
+        }
+        // --- End page-by-page subtraction ---
+
+        console.log(`Extracted text from ${pagesText.length} pages successfully.`);
+        return pagesText; 
     } catch (error) {
         console.error('Error during page-by-page PDF parsing:', error);
         throw new Error('Failed to parse PDF page by page.');
@@ -148,6 +196,11 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
         // --- Process each page with AI ---        
         for (let i = 0; i < pagesTextArray.length; i++) {
             const pageText = pagesTextArray[i];
+            // --- Add logging for Page 1 Text Input ---
+            if (i === 0) {
+                console.log(`\n--- Page 1 Text Sent to AI (Length: ${pageText.length}) ---\n${pageText.substring(0, 1500)} ... (truncated) ...\n------------------------------------------\n`);
+            }
+            // --- End logging ---
             console.log(`Sending Page ${i + 1}/${pagesTextArray.length} text to AI (length: ${pageText.length})...`);
             
             if (!pageText || pageText.trim().length === 0) {
