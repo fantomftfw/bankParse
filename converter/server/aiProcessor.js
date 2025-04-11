@@ -112,14 +112,29 @@ function validateTransactionBalances(transactions) {
             continue;
         }
 
-
-        // Ensure numeric types, defaulting null/undefined debit/credit to 0
         const prevBalance = parseFloat(prevTx.Balance);
-        const currentBalance = parseFloat(currentTxProcessed.Balance); // Use the potentially modified currentTx
-        const deposit = parseFloat(currentTxProcessed['Deposit(Cr)']) || 0;
-        const withdrawal = parseFloat(currentTxProcessed['Withdrawal (Dr)']) || 0;
+        const currentBalance = parseFloat(currentTxProcessed.Balance); 
+        
+        // Determine which set of keys to use for credit/debit
+        let credit = 0;
+        let debit = 0;
+        if (currentTxProcessed['Deposit(Cr)'] !== undefined || currentTxProcessed['Withdrawal (Dr)'] !== undefined) {
+            // Use Dr/Cr schema
+            credit = parseFloat(currentTxProcessed['Deposit(Cr)']) || 0;
+            debit = parseFloat(currentTxProcessed['Withdrawal (Dr)']) || 0;
+            // console.log(`  -> Using Dr/Cr keys for index ${i}`);
+        } else if (currentTxProcessed['Credit'] !== undefined || currentTxProcessed['Debit'] !== undefined) {
+            // Use Debit/Credit schema
+            credit = parseFloat(currentTxProcessed['Credit']) || 0;
+            debit = parseFloat(currentTxProcessed['Debit']) || 0;
+            // console.log(`  -> Using Debit/Credit keys for index ${i}`);
+        } else {
+            // Likely Opening Balance or row with no monetary change - values default to 0
+            // console.log(`  -> No Debit/Credit/Dr/Cr keys found for index ${i}`);
+        }
 
-        if (isNaN(prevBalance) || isNaN(currentBalance) || isNaN(deposit) || isNaN(withdrawal)) {
+        // Check for NaN *after* attempting to parse potential keys
+        if (isNaN(prevBalance) || isNaN(currentBalance) || isNaN(credit) || isNaN(debit)) {
             console.warn(`Skipping balance validation for transaction at index ${i} due to non-numeric values. Marking as potential mismatch:`, currentTx);
             currentTxProcessed.balanceMismatch = true; // Mark as problematic due to data issue
             processedTransactions.push(currentTxProcessed);
@@ -127,7 +142,7 @@ function validateTransactionBalances(transactions) {
             continue; // Move to next transaction
         }
 
-        const expectedBalance = prevBalance + deposit - withdrawal;
+        const expectedBalance = prevBalance + credit - debit;
 
         // Check if the current balance matches the expected balance within tolerance
         if (Math.abs(currentBalance - expectedBalance) <= BALANCE_TOLERANCE) {
@@ -136,30 +151,39 @@ function validateTransactionBalances(transactions) {
         } else {
             // --- Attempt Correction for Type Misclassification ---
             let corrected = false;
-            // Check if it was reported as only deposit or only withdrawal
-            const isOnlyDeposit = deposit > 0 && withdrawal === 0;
-            const isOnlyWithdrawal = withdrawal > 0 && deposit === 0;
+            // Check if it was reported as only deposit or only withdrawal *using the detected keys*
+            const isOnlyDeposit = credit > 0 && debit === 0;
+            const isOnlyWithdrawal = debit > 0 && credit === 0;
 
             if (isOnlyDeposit || isOnlyWithdrawal) {
                 let hypotheticalExpectedBalance;
-                if (isOnlyDeposit) {
-                    // What if the deposit was actually a withdrawal?
-                    hypotheticalExpectedBalance = prevBalance + 0 - deposit;
-                } else { // isOnlyWithdrawal
-                    // What if the withdrawal was actually a deposit?
-                    hypotheticalExpectedBalance = prevBalance + withdrawal - 0;
+                if (isOnlyDeposit) { // What if Credit was Debit?
+                    hypotheticalExpectedBalance = prevBalance + 0 - credit;
+                } else { // What if Debit was Credit?
+                    hypotheticalExpectedBalance = prevBalance + debit - 0;
                 }
 
                 // Does the swapped type match the actual balance?
                 if (Math.abs(currentBalance - hypotheticalExpectedBalance) <= BALANCE_TOLERANCE) {
-                    console.warn(`Correcting type misclassification at index ${i}: Prev Bal: ${prevBalance}, Original Deposit: ${deposit}, Original Withdrawal: ${withdrawal}, Actual Bal: ${currentBalance}. Assuming swapped type.`);
+                    console.warn(`Correcting type misclassification at index ${i}: Prev Bal: ${prevBalance}, Original Credit: ${credit}, Original Debit: ${debit}, Actual Bal: ${currentBalance}. Assuming swapped type.`);
                     // Apply the correction
                     if (isOnlyDeposit) {
-                        currentTxProcessed['Withdrawal (Dr)'] = deposit;
-                        currentTxProcessed['Deposit(Cr)'] = null;
+                        // Check which schema was used to apply correctly
+                        if (currentTxProcessed['Deposit(Cr)'] !== undefined) {
+                             currentTxProcessed['Withdrawal (Dr)'] = credit;
+                             currentTxProcessed['Deposit(Cr)'] = null;
+                        } else {
+                             currentTxProcessed['Debit'] = credit;
+                             currentTxProcessed['Credit'] = null;
+                        }
                     } else { // isOnlyWithdrawal
-                        currentTxProcessed['Deposit(Cr)'] = withdrawal;
-                        currentTxProcessed['Withdrawal (Dr)'] = null;
+                        if (currentTxProcessed['Withdrawal (Dr)'] !== undefined) {
+                             currentTxProcessed['Deposit(Cr)'] = debit;
+                             currentTxProcessed['Withdrawal (Dr)'] = null;
+                        } else {
+                             currentTxProcessed['Credit'] = debit;
+                             currentTxProcessed['Debit'] = null;
+                        }
                     }
                     currentTxProcessed.balanceMismatch = false; // Resolved the mismatch
                     currentTxProcessed.correctedType = true; // Add flag indicating correction
@@ -171,7 +195,7 @@ function validateTransactionBalances(transactions) {
 
             // --- If Not Corrected, Flag as Mismatch ---
             if (!corrected) {
-                console.warn(`Balance mismatch at index ${i}: Prev Bal: ${prevBalance}, Deposit: ${deposit}, Withdrawal: ${withdrawal}, Expected: ${expectedBalance.toFixed(2)}, Actual: ${currentBalance}. Flagging transaction:`, currentTx);
+                console.warn(`Balance mismatch at index ${i}: Prev Bal: ${prevBalance}, Credit: ${credit}, Debit: ${debit}, Expected: ${expectedBalance.toFixed(2)}, Actual: ${currentBalance}. Flagging transaction:`, currentTx);
                 currentTxProcessed.balanceMismatch = true; // Set flag
                 currentTxProcessed.correctedType = false; // Explicitly false
                 processedTransactions.push(currentTxProcessed);
@@ -192,19 +216,40 @@ function validateTransactionBalances(transactions) {
  * @param {object} tx Transaction object
  * @returns {boolean} True if required fields are present, false otherwise.
  */
- function isValidTransaction(tx) {
-    // Check for the essential fields needed for balance validation.
-    // Allow rows with Remarks and Balance even if Dr/Cr are null/0 (for Opening Balance).
-    const hasWithdrawal = tx['Withdrawal (Dr)'] !== null && tx['Withdrawal (Dr)'] !== undefined;
-    const hasDeposit = tx['Deposit(Cr)'] !== null && tx['Deposit(Cr)'] !== undefined;
+function isValidTransaction(tx) {
+    if (!tx || tx.Balance === undefined) {
+        return false; // Must have an object and a Balance
+    }
+
+    // Check for at least one valid description key
+    const hasDescription = tx['Transaction Remarks'] !== undefined || 
+                           tx['Transaction details'] !== undefined || 
+                           tx['Narration'] !== undefined;
+
+    if (!hasDescription) {
+        return false;
+    }
+
+    // Check for monetary values OR explicitly allow if both sets are missing/null/zero (Opening Balance case)
+    const hasWithdrawalDr = tx['Withdrawal (Dr)'] !== null && tx['Withdrawal (Dr)'] !== undefined;
+    const hasDepositCr = tx['Deposit(Cr)'] !== null && tx['Deposit(Cr)'] !== undefined;
+    const hasDebit = tx['Debit'] !== null && tx['Debit'] !== undefined;
+    const hasCredit = tx['Credit'] !== null && tx['Credit'] !== undefined;
+
     const withdrawalAmount = parseFloat(tx['Withdrawal (Dr)']) || 0;
     const depositAmount = parseFloat(tx['Deposit(Cr)']) || 0;
+    const debitAmount = parseFloat(tx['Debit']) || 0;
+    const creditAmount = parseFloat(tx['Credit']) || 0;
 
-    return tx &&
-           tx['Transaction Remarks'] !== undefined &&
-           tx.Balance !== undefined &&
-           ( (hasWithdrawal && withdrawalAmount !== 0) || (hasDeposit && depositAmount !== 0) || (!hasWithdrawal && !hasDeposit) || (withdrawalAmount === 0 && depositAmount === 0) ); // Either Dr or Cr has a non-zero value OR both are absent/zero (like opening balance)
- }
+    const hasDrCrActivity = (hasWithdrawalDr && withdrawalAmount !== 0) || (hasDepositCr && depositAmount !== 0);
+    const hasDebitCreditActivity = (hasDebit && debitAmount !== 0) || (hasCredit && creditAmount !== 0);
+
+    const isOpeningBalance = (!hasWithdrawalDr && !hasDepositCr && !hasDebit && !hasCredit) || 
+                             (withdrawalAmount === 0 && depositAmount === 0 && debitAmount === 0 && creditAmount === 0);
+
+    // Valid if it has balance, description, AND (EITHER monetary activity OR it's an opening balance type)
+    return (hasDrCrActivity || hasDebitCreditActivity || isOpeningBalance);
+}
 
 /**
  * Attempts to identify the bank name from text using AI.
