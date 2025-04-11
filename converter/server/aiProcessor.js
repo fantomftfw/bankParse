@@ -257,7 +257,6 @@ async function extractTransactionsWithAI(textContent) {
         const jsonText = response.text();
 
         console.log("Received response from Gemini AI.");
-        // Basic check for empty response
         if (!jsonText) {
              console.error("AI response text is empty.");
              throw new Error("AI returned an empty response.");
@@ -265,18 +264,16 @@ async function extractTransactionsWithAI(textContent) {
 
         let parsedTransactions;
         try {
-            // Note: The 'application/json' mime type should mean we don't need manual cleaning,
-            // but we keep the try-catch just in case.
             parsedTransactions = JSON.parse(jsonText);
         } catch (parseError) {
              console.error("Failed to parse AI JSON response:", parseError);
-             console.error("Raw AI response text:", jsonText); // Log raw response for debugging
+             console.error("\n--- Raw AI response text (Failed Parse) ---\n", jsonText, "\n---"); // Log raw response
             throw new Error(`Failed to parse AI response as JSON: ${parseError.message}`);
         }
 
-        // Validate the structure - should be an array
         if (!Array.isArray(parsedTransactions)) {
              console.error("AI response was not a JSON array. Response:", parsedTransactions);
+             console.error("\n--- Raw AI response text (Not Array) ---\n", jsonText, "\n---"); // Log raw response
             throw new Error('AI response was not in the expected JSON array format.');
         }
 

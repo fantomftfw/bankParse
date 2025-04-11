@@ -1,32 +1,49 @@
 import React from 'react';
-import './StatusMessage.css'; // Import a dedicated CSS file
+// Optional: Import CSS if you add specific styles for StatusMessage
+// import './StatusMessage.css'; 
 
-function StatusMessage({ message, type }) {
-  if (!message && type !== 'loading') { // Keep showing if loading, even without specific text message
+function StatusMessage({ message, type = 'info' }) {
+  if (!message) {
     return null;
   }
 
-  let typeClass = '';
+  const style = {
+    padding: '10px',
+    margin: '10px 0',
+    border: '1px solid',
+    borderRadius: '4px',
+    maxWidth: '600px', // Limit width
+    margin: '15px auto', // Center block
+  };
+
   switch (type) {
-    case 'error':
-      typeClass = 'status-error';
-      break;
     case 'success':
-      typeClass = 'status-success';
+      style.borderColor = '#4CAF50';
+      style.color = '#4CAF50';
+      style.backgroundColor = '#e8f5e9';
+      break;
+    case 'error':
+      style.borderColor = '#f44336';
+      style.color = '#f44336';
+      style.backgroundColor = '#ffebee';
       break;
     case 'loading':
-      typeClass = 'status-loading';
+      style.borderColor = '#4a90e2';
+      style.color = '#4a90e2';
+      style.backgroundColor = '#e7f0fe';
       break;
-    case 'info':
-    default:
-      typeClass = 'status-info';
+    default: // info
+      style.borderColor = '#cccccc';
+      style.color = '#333333';
+      style.backgroundColor = '#f8f8f8';
       break;
   }
 
   return (
-    <div className={`status-message ${typeClass}`}>
-      {type === 'loading' && <div className="spinner"></div>} {/* Add spinner */} 
-      <span>{message || (type === 'loading' ? 'Processing...' : '')}</span> {/* Default loading text */}
+    // Add the 'loading' class conditionally for styling with spinner
+    <div style={style} className={`status-message ${type}`}>
+      {type === 'loading' && <div className="spinner"></div>} 
+      {message}
     </div>
   );
 }
