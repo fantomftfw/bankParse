@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+converter/client/node_modules/
+converter/server/node_modules/
+
+# Build output
+converter/client/build/
+
+# Environment variables
+.env
+converter/server/.env
+
+# Uploads and Exports (Server)
+converter/server/uploads/
+converter/server/csv_exports/
+
+# OS generated files
+.DS_Store
+Thumbs.db 
