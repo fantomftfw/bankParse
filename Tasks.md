@@ -33,26 +33,29 @@
 5. **Core Components**
    - [X] Create App component (Basic structure)
    - [X] Build file upload interface (FileUpload.js basic structure)
-   - [ ] Implement progress indicators (Partial: Loading message in StatusMessage)
-   - [X] Create transaction data preview table (TransactionPreview.js basic structure)
+   - [X] Implement progress indicators (Partial: Loading message/spinner in StatusMessage)
+   - [X] Create transaction data preview table (TransactionPreview.js basic structure - replaced)
    - [X] Design error messaging components (StatusMessage.js basic structure)
    - [X] Build download interface (DownloadButton.js basic structure)
+   - [X] Build editable data table component (EditableDataTable.js - display, pagination, editing done)
 
 6. **UI/UX**
    - [ ] Design responsive layout
    - [X] Implement CSS styles (Basic App.css)
-   - [ ] Create loading animations (Partial: Loading text)
+   - [X] Create loading animations (Spinner added)
    - [ ] Add hover states and interactive elements (Basic button hover)
    - [ ] Ensure accessibility compliance
    - [ ] Test responsiveness on various devices
 
 7. **Frontend Logic**
-   - [ ] Implement file validation (Client-side TODO added)
+   - [X] Implement file validation (Client-side check added)
    - [X] Build API request handling (in App.js using fetch)
    - [X] Create state management for uploaded files (in App.js using useState)
    - [X] Set up processing status tracking (in App.js using useState)
    - [X] Implement data preview functionality (in App.js and TransactionPreview.js)
    - [X] Create error handling logic (Basic try/catch in App.js)
+   - [X] Implement inline editing in data table
+   - [In Progress] Implement feedback submission mechanism
 
 ## Backend Development
 
@@ -79,6 +82,7 @@
     - [X] Create header definitions
     - [X] Implement CSV file storage
     - [X] Set up file download endpoint
+    - [X] Implement feedback submission endpoint (logging only)
 
 ## Testing and Quality Assurance
 
@@ -136,7 +140,7 @@
     - [ ] Monitor API costs and usage
 
 20. **Feedback and Iteration**
-    - [ ] Collect user feedback
+    - [ ] Collect user feedback (Mechanism added)
     - [ ] Analyze extraction accuracy
     - [ ] Identify improvement opportunities
     - [ ] Plan for feature enhancements

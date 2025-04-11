@@ -223,6 +223,29 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
     next();
 });
 
+// --- Feedback Submission Route ---
+app.post('/api/feedback', (req, res) => {
+  console.log('[Feedback Received] Received feedback data:');
+  // In a real app, validate req.body.correctedData here
+  if (!req.body || !req.body.correctedData || !Array.isArray(req.body.correctedData)) {
+    console.error('[Feedback Received] Invalid or missing feedback data.');
+    return res.status(400).json({ error: 'Invalid feedback data format.' });
+  }
+  
+  const correctedData = req.body.correctedData;
+  console.log(`  -> Received ${correctedData.length} rows.`);
+  // Limit logging if data is very large
+  if (correctedData.length < 50) { 
+     console.log(JSON.stringify(correctedData, null, 2)); // Pretty print for readability
+  } else {
+     console.log(`  -> (Data too large to log fully)`);
+  }
+
+  // TODO: Implement database saving logic here
+  // For now, just acknowledge receipt
+  console.log('[Feedback Received] Data logged. No database configured.');
+  res.status(200).json({ message: 'Feedback received successfully.' });
+});
 
 // --- CSV Download Route (Task 11) ---
 app.get('/api/download/:downloadId', (req, res, next) => {
