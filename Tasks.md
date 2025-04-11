@@ -154,6 +154,8 @@
     - [X] Define DB Schema: `ProcessingResults` (to store initial AI output)
     - [X] Modify `/api/upload` to generate `run_id`, store `ProcessingResults`, return `run_id`
     - [X] Modify `/api/feedback` to require `run_id` and store feedback linked to run
+    - [X] Add `user_confirmed_accuracy` column to `ProcessingResults`
+    - [X] Create `/api/confirm-accuracy` endpoint
 
 22. **Backend - Prompt Gallery Infrastructure**
     - [X] Define DB Schema: `Prompts` (bank_identifier, text, version, etc.)
@@ -168,6 +170,8 @@
     - [X] Send `run_id` with `/api/feedback` request
     - [-] Add UI for Bank Selection (Not needed if auto-detection works reliably)
     - [-] Pass selected Bank ID from Frontend to Backend (Not needed if auto-detection works reliably)
+    - [X] Add UI for Accuracy Confirmation (Yes/No)
+    - [X] Implement API call for Accuracy Confirmation
 
 24. **Backend - Feedback Analysis & Prompt Refinement (Future)**
     - [ ] Implement comparison logic between initial result and feedback

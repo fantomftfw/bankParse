@@ -17,7 +17,13 @@ th, td {
   border: 1px solid #ddd;
   padding: 8px;
   text-align: left;
-  white-space: nowrap; /* Prevent text wrapping initially */
+}
+
+/* Add media query for wider screens */
+@media (min-width: 768px) {
+  th, td {
+    white-space: nowrap; /* Apply nowrap only on wider screens */
+  }
 }
 
 th {
@@ -105,5 +111,43 @@ td.editing input {
   display: inline-block;
   margin-left: 15px;
   font-style: italic;
+  color: #333;
+}
+
+/* Accuracy Confirmation Styles */
+.accuracy-confirmation {
+  padding: 15px;
+  margin: 15px 0;
+  background-color: #f0f8ff; /* Light blue background */
+  border: 1px solid #b0e0e6; /* Powder blue border */
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center; /* Center items */
+  flex-wrap: wrap; /* Allow wrapping */
+}
+
+.accuracy-confirmation span {
+  margin-right: 15px;
+}
+
+.accuracy-confirmation button {
+  padding: 5px 10px;
+  margin: 0 5px;
+  cursor: pointer;
+}
+
+.accuracy-confirmation .spinner {
+  margin-left: 10px;
+  width: 16px; /* Smaller spinner */
+  height: 16px;
+  border-width: 2px;
+}
+
+.feedback-status-persistent {
+  padding: 10px;
+  margin: 15px 0;
+  text-align: center;
+  font-weight: bold;
   color: #333;
 } 

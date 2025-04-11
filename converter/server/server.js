@@ -342,6 +342,44 @@ app.post('/api/feedback', async (req, res) => { // Make async
   }
 });
 
+// --- Accuracy Confirmation Route ---
+app.post('/api/confirm-accuracy', async (req, res) => {
+  const { runId, isAccurate } = req.body;
+
+  console.log(`[Accuracy Confirm] Received confirmation for runId: ${runId}, Accurate: ${isAccurate}`);
+
+  // Validate input
+  if (!runId || typeof isAccurate !== 'boolean') {
+    console.error('[Accuracy Confirm] Invalid input.', { runId, isAccurate });
+    return res.status(400).json({ error: 'Missing runId or invalid isAccurate flag.' });
+  }
+
+  try {
+    const updateQuery = `
+      UPDATE ProcessingResults
+      SET user_confirmed_accuracy = $1
+      WHERE id = $2
+      RETURNING id;
+    `;
+    const values = [isAccurate, runId];
+
+    console.log('Updating accuracy confirmation in database...');
+    const dbResult = await db.query(updateQuery, values);
+
+    if (dbResult.rowCount === 0) {
+      console.warn(`[Accuracy Confirm] No ProcessingResult found for runId: ${runId}`);
+      return res.status(404).json({ error: `Processing run not found for runId: ${runId}` });
+    }
+
+    console.log(`Stored accuracy confirmation for runId: ${dbResult.rows[0].id}`);
+    res.status(200).json({ message: 'Accuracy confirmation received.' });
+
+  } catch (dbError) {
+    console.error('[Accuracy Confirm] Error updating accuracy confirmation:', dbError);
+    res.status(500).json({ error: 'Failed to store accuracy confirmation.' });
+  }
+});
+
 // --- CSV Download Route (Task 11) ---
 app.get('/api/download/:downloadId', (req, res, next) => {
     const downloadId = req.params.downloadId;

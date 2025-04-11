@@ -88,7 +88,8 @@ const createTablesAndPrompts = async () => {
       ai_model_used TEXT,
       prompt_used_id INTEGER, -- Assuming prompt ID is integer for now
       initial_ai_result_json JSONB, 
-      flags_raised_json JSONB
+      flags_raised_json JSONB,
+      user_confirmed_accuracy BOOLEAN DEFAULT NULL -- Add column for accuracy confirmation
     );
   `;
 
@@ -136,6 +137,17 @@ const createTablesAndPrompts = async () => {
     await db.query(enableUuidExtension);
     console.log('Creating ProcessingResults table if not exists...');
     await db.query(createProcessingResultsTable);
+    
+    // --- Add column if it doesn't exist (for existing tables) ---
+    // This avoids errors if the table already exists without the column
+    const alterProcessingResultsTable = `
+      ALTER TABLE ProcessingResults
+      ADD COLUMN IF NOT EXISTS user_confirmed_accuracy BOOLEAN DEFAULT NULL;
+    `;
+    console.log('Ensuring user_confirmed_accuracy column exists...');
+    await db.query(alterProcessingResultsTable);
+    // --- End Add column --- 
+    
     console.log('Creating FeedbackSubmissions table if not exists...');
     await db.query(createFeedbackSubmissionsTable);
     console.log('Creating Prompts table if not exists...');

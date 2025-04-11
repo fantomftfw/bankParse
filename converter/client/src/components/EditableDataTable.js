@@ -11,6 +11,9 @@ function EditableDataTable({ data, runId }) {
   // State for feedback submission
   const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
   const [feedbackStatus, setFeedbackStatus] = useState('');
+  // State for accuracy confirmation
+  const [accuracyConfirmed, setAccuracyConfirmed] = useState(false);
+  const [isConfirmingAccuracy, setIsConfirmingAccuracy] = useState(false);
 
   // Effect to update local state when data prop changes
   useEffect(() => {
@@ -20,6 +23,8 @@ function EditableDataTable({ data, runId }) {
     setEditingCell(null); // Cancel any active edit
     setFeedbackStatus(''); // Reset feedback status on new data
     setIsSubmittingFeedback(false);
+    setAccuracyConfirmed(false); // Reset confirmation on new data
+    setIsConfirmingAccuracy(false);
   }, [data, runId]);
 
   if (!editedData || editedData.length === 0) {
@@ -127,9 +132,62 @@ function EditableDataTable({ data, runId }) {
   };
   // --- End Feedback Logic ---
 
+  // --- Accuracy Confirmation Logic ---
+  const handleAccuracyConfirm = async (accurate) => {
+    if (!runId || isConfirmingAccuracy) return;
+
+    setIsConfirmingAccuracy(true);
+    setFeedbackStatus(accurate ? 'Confirming accuracy...' : 'Submitting inaccuracy report...'); 
+
+    try {
+      const API_BASE_URL = process.env.REACT_APP_API_URL || '';
+      const response = await fetch(`${API_BASE_URL}/api/confirm-accuracy`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ runId: runId, isAccurate: accurate }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || `HTTP error! status: ${response.status}`);
+      }
+      
+      setFeedbackStatus(accurate ? 'Accuracy confirmed! Thank you.' : 'Report submitted. Please use the table below to correct errors if needed.');
+      setAccuracyConfirmed(true); // Mark as confirmed to potentially hide buttons
+
+    } catch (error) {
+      console.error('Accuracy Confirmation Error:', error);
+      setFeedbackStatus(`Error submitting confirmation: ${error.message}`);
+    } finally {
+      setIsConfirmingAccuracy(false);
+    }
+  };
+  // --- End Accuracy Confirmation Logic ---
+
   return (
     <div className="table-container">
       <h2>Editable Transaction Data</h2>
+      {/* --- Accuracy Confirmation UI --- */}
+      {!accuracyConfirmed && runId && (
+        <div className="accuracy-confirmation">
+          <span>Was the extraction accurate?</span>
+          <button onClick={() => handleAccuracyConfirm(true)} disabled={isConfirmingAccuracy}>
+            Yes
+          </button>
+          <button onClick={() => handleAccuracyConfirm(false)} disabled={isConfirmingAccuracy}>
+            No (Correct Below)
+          </button>
+          {isConfirmingAccuracy && <span className="spinner"></span>} 
+        </div>
+      )}
+      {/* Display status from confirmation */} 
+      {accuracyConfirmed && feedbackStatus && 
+          <p className="feedback-status-persistent">{feedbackStatus}</p>} 
+      {/* --- End Accuracy Confirmation UI --- */}
+
       {/* --- Pagination Controls --- */} 
       <div className="pagination-controls">
          <span>Rows per page:</span>
@@ -207,16 +265,18 @@ function EditableDataTable({ data, runId }) {
       </div>
       {/* --- End Pagination Controls --- */} 
 
-      {/* --- Feedback Section --- */}
-      <div className="feedback-section">
-         <button 
-           onClick={handleFeedbackSubmit} 
-           disabled={isSubmittingFeedback || editedData.length === 0 || !runId}
-         >
-           {isSubmittingFeedback ? 'Submitting...' : 'Submit Corrections as Feedback'}
-         </button>
-         {feedbackStatus && <span className="feedback-status">{feedbackStatus}</span>}
-      </div>
+      {/* --- Feedback Section (Only show if accuracy not confirmed or confirmed as No) --- */}
+      {(!accuracyConfirmed || feedbackStatus.includes('Report submitted')) && (
+          <div className="feedback-section">
+            <button 
+              onClick={handleFeedbackSubmit} 
+              disabled={isSubmittingFeedback || editedData.length === 0 || !runId}
+            >
+              {isSubmittingFeedback ? 'Submitting...' : 'Submit Corrections as Feedback'}
+            </button>
+            {feedbackStatus && <span className="feedback-status">{feedbackStatus}</span>}
+          </div>
+      )}
       {/* --- End Feedback Section --- */}
 
     </div>
