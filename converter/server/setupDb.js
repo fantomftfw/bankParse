@@ -3,6 +3,8 @@ const db = require('./db');
 // Define Prompts
 const defaultPromptText = `
 Analyze the following bank statement text and extract all transaction details.
+Focus ONLY on rows representing individual transactions with clear debit, credit, or balance changes.
+Ignore page headers, footers, summary lines, opening/closing balance summaries, or any text outside the main transaction list.
 Format the output as a JSON array of objects. Each object MUST represent a single transaction
 and MUST contain the following keys EXACTLY:
 - "Serial no.": The transaction serial number or sequence identifier (string or null if not present).
@@ -22,10 +24,12 @@ Example object:
   "Balance": 1450.75
 }
 
-Ensure all monetary values are represented as numbers (e.g., 123.45, not "$123.45").
-If a transaction is clearly a credit, the "Debit" value should be null.
-If a transaction is clearly a debit, the "Credit" value should be null.
-Do NOT include any introductory text, explanations, or markdown fences (like \`\`\`json) in your response.
+IMPORTANT RULES:
+- Ensure all monetary values are represented as numbers (e.g., 123.45, not "$123.45").
+- If a transaction is clearly a credit, the "Debit" value should be null.
+- If a transaction is clearly a debit, the "Credit" value should be null.
+- ONLY include rows that are clearly individual transactions. Do not include summaries.
+- Do NOT include any introductory text, explanations, or markdown fences (like \`\`\`json) in your response.
 Provide ONLY the JSON array.
 
 Bank Statement Text:
@@ -36,6 +40,8 @@ Bank Statement Text:
 
 const iciciPromptText = `
 Analyze the following bank statement text and extract all transaction details.
+Focus ONLY on rows representing individual transactions with clear debit, credit, or balance changes.
+Ignore page headers, footers, summary lines, opening/closing balance summaries, or any text outside the main transaction list.
 Format the output as a JSON array of objects. Each object MUST represent a single transaction
 and MUST contain the following keys EXACTLY, matching the structure of the target CSV:
 - "Sl No": The transaction serial number or sequence identifier (string or number, or null if not present).
@@ -70,6 +76,7 @@ IMPORTANT RULES:
 - If a transaction is a withdrawal, the "Deposit(Cr)" value MUST be null and "Withdrawal (Dr)" MUST be a positive number.
 - If a transaction is a deposit, the "Withdrawal (Dr)" value MUST be null and "Deposit(Cr)" MUST be a positive number.
 - Extract the data as accurately as possible from the text.
+- ONLY include rows that are clearly individual transactions. Do not include summaries.
 - Do NOT include any introductory text, explanations, or markdown fences (like \`\`\`json) in your response.
 - Provide ONLY the JSON array.
 
@@ -98,7 +105,8 @@ const createTablesAndPrompts = async () => {
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       run_id UUID REFERENCES ProcessingResults(id) ON DELETE CASCADE, -- Link to the processing run
       submitted_at TIMESTAMPTZ DEFAULT NOW(),
-      corrected_data_json JSONB
+      corrected_data_json JSONB,
+      analysis_json JSONB DEFAULT NULL -- Add column for analysis results
     );
   `;
 
@@ -150,6 +158,16 @@ const createTablesAndPrompts = async () => {
     
     console.log('Creating FeedbackSubmissions table if not exists...');
     await db.query(createFeedbackSubmissionsTable);
+    
+    // --- Add analysis_json column if it doesn't exist ---
+    const alterFeedbackSubmissionsTable = `
+      ALTER TABLE FeedbackSubmissions
+      ADD COLUMN IF NOT EXISTS analysis_json JSONB DEFAULT NULL;
+    `;
+    console.log('Ensuring analysis_json column exists in FeedbackSubmissions...');
+    await db.query(alterFeedbackSubmissionsTable);
+    // --- End Add column ---
+    
     console.log('Creating Prompts table if not exists...');
     await db.query(createPromptsTable);
     

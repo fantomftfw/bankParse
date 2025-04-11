@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const pdf = require('pdf-parse'); // Require pdf-parse at the top
 const db = require('./db'); // Import the db utility
+const { compareResults } = require('./feedbackAnalyzer'); // Import the analyzer
 
 // Import AI processing logic
 const { extractTransactionsWithAI, identifyBankWithAI } = require('./aiProcessor');
@@ -298,10 +299,8 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
 });
 
 // --- Feedback Submission Route ---
-app.post('/api/feedback', async (req, res) => { // Make async
+app.post('/api/feedback', async (req, res) => {
   console.log('[Feedback Received] Received feedback data:');
-  
-  // Extract runId and correctedData from request body
   const { runId, correctedData } = req.body;
 
   // Validate input
@@ -317,20 +316,38 @@ app.post('/api/feedback', async (req, res) => { // Make async
   console.log(`  -> Received ${correctedData.length} rows for runId: ${runId}`);
   
   try {
-      // Store feedback linked to the runId
+      // 1. Fetch the initial result associated with runId
+      const initialResultQuery = `SELECT initial_ai_result_json FROM ProcessingResults WHERE id = $1`;
+      const initialResult = await db.query(initialResultQuery, [runId]);
+
+      if (initialResult.rows.length === 0) {
+          console.error(`[Feedback Received] Original processing run not found for runId: ${runId}`);
+          return res.status(404).json({ error: 'Original processing run not found.' });
+      }
+      const initialData = initialResult.rows[0].initial_ai_result_json;
+
+      // 2. Compare initialData with correctedData
+      const analysis = compareResults(initialData, correctedData);
+      console.log('[Feedback Received] Analysis Result:', analysis);
+
+      // 3. Store feedback linked to the runId, including analysis
       const insertQuery = `
-          INSERT INTO FeedbackSubmissions (run_id, corrected_data_json)
-          VALUES ($1, $2)
+          INSERT INTO FeedbackSubmissions (run_id, corrected_data_json, analysis_json)
+          VALUES ($1, $2, $3)
           RETURNING id;
       `;
-      const values = [runId, JSON.stringify(correctedData)];
+      const values = [
+          runId, 
+          JSON.stringify(correctedData),
+          JSON.stringify(analysis) // Store the analysis object
+      ];
 
       console.log('Storing feedback submission in database...');
       const dbResult = await db.query(insertQuery, values);
       const feedbackId = dbResult.rows[0].id;
       console.log(`Stored feedback with id: ${feedbackId}`);
 
-      res.status(200).json({ message: 'Feedback received successfully.', feedbackId: feedbackId });
+      res.status(200).json({ message: 'Feedback received and analysis stored.'}); // Update message
 
   } catch (dbError) {
       console.error('Error saving feedback submission to database:', dbError);
@@ -379,6 +396,70 @@ app.post('/api/confirm-accuracy', async (req, res) => {
     res.status(500).json({ error: 'Failed to store accuracy confirmation.' });
   }
 });
+
+// --- Prompt Management API (Basic) ---
+
+// GET all active prompts
+app.get('/api/prompts', async (req, res) => {
+    try {
+        const result = await db.query('SELECT id, bank_identifier, version, is_default, created_at FROM Prompts WHERE is_active = true ORDER BY bank_identifier NULLS FIRST, version DESC');
+        res.status(200).json(result.rows);
+    } catch (err) {
+        console.error('Error fetching prompts:', err);
+        res.status(500).json({ error: 'Failed to fetch prompts' });
+    }
+});
+
+// GET a specific prompt by ID (including text)
+app.get('/api/prompts/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await db.query('SELECT * FROM Prompts WHERE id = $1', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Prompt not found' });
+        }
+        res.status(200).json(result.rows[0]);
+    } catch (err) {
+        console.error(`Error fetching prompt ${id}:`, err);
+        res.status(500).json({ error: 'Failed to fetch prompt' });
+    }
+});
+
+// POST a new prompt (version 1)
+app.post('/api/prompts', async (req, res) => {
+    const { bank_identifier, prompt_text, is_default = false } = req.body;
+    if (!prompt_text) {
+        return res.status(400).json({ error: 'prompt_text is required' });
+    }
+    // Basic validation for bank_identifier format if needed
+    const bankId = bank_identifier ? bank_identifier.toUpperCase() : null;
+
+    try {
+        // Ensure only one default exists if setting this as default
+        if (is_default === true) {
+             await db.query('UPDATE Prompts SET is_default = false WHERE is_default = true');
+        }
+
+        const insertQuery = `
+            INSERT INTO Prompts (bank_identifier, prompt_text, is_default, is_active, version)
+            VALUES ($1, $2, $3, true, 1)
+            ON CONFLICT (bank_identifier) DO UPDATE SET 
+                prompt_text = EXCLUDED.prompt_text, 
+                version = Prompts.version + 1, -- Increment version on update
+                is_default = EXCLUDED.is_default,
+                is_active = true, -- Ensure it becomes active on update
+                created_at = NOW() -- Update timestamp
+            RETURNING *;
+        `;
+        const result = await db.query(insertQuery, [bankId, prompt_text, is_default]);
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error('Error creating/updating prompt:', err);
+        res.status(500).json({ error: 'Failed to create/update prompt' });
+    }
+});
+
+// TODO: Add PUT/PATCH for updates, DELETE (or toggle is_active)
 
 // --- CSV Download Route (Task 11) ---
 app.get('/api/download/:downloadId', (req, res, next) => {

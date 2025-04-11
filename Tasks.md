@@ -159,7 +159,7 @@
 
 22. **Backend - Prompt Gallery Infrastructure**
     - [X] Define DB Schema: `Prompts` (bank_identifier, text, version, etc.)
-    - [ ] Implement Basic CRUD API for Prompts (Optional - for manual management)
+    - [X] Implement Basic CRUD API for Prompts (Optional - for manual management)
     - [X] Design Bank Identification Strategy (AI Classification)
     - [X] Create `identifyBankWithAI` function
     - [X] Integrate `identifyBankWithAI` call into `/api/upload`
@@ -174,7 +174,8 @@
     - [X] Implement API call for Accuracy Confirmation
 
 24. **Backend - Feedback Analysis & Prompt Refinement (Future)**
-    - [ ] Implement comparison logic between initial result and feedback
+    - [X] Implement comparison logic between initial result and feedback
+    - [X] Store feedback analysis results in DB
     - [ ] Develop metrics for prompt performance tracking
     - [ ] Implement prompt ranking logic
     - [ ] Research/Implement automatic prompt generation/refinement techniques
