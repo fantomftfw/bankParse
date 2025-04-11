@@ -144,11 +144,21 @@ function validateTransactionBalances(transactions) {
 
         const expectedBalance = prevBalance + credit - debit;
 
+        // --- Add Detailed Logging for i=1 --- 
+        if (i === 1) {
+            console.log(`[Debug i=1] PrevTx:`, JSON.stringify(prevTx));
+            console.log(`[Debug i=1] CurrentTx Raw:`, JSON.stringify(currentTx));
+            console.log(`[Debug i=1] Values: prevBalance=${prevBalance}, currentBalance=${currentBalance}, credit=${credit}, debit=${debit}, expectedBalance=${expectedBalance.toFixed(2)}`);
+        }
+        // --- End Detailed Logging --- 
+
         // Check if the current balance matches the expected balance within tolerance
         if (Math.abs(currentBalance - expectedBalance) <= BALANCE_TOLERANCE) {
+            if (i === 1) console.log(`[Debug i=1] Initial balance check PASSED.`);
             // Balance matches, push as is (balanceMismatch is already false)
             processedTransactions.push(currentTxProcessed);
         } else {
+            if (i === 1) console.log(`[Debug i=1] Initial balance check FAILED.`);
             // --- Attempt Correction for Type Misclassification ---
             let corrected = false;
             // Check if it was reported as only deposit or only withdrawal *using the detected keys*
@@ -163,8 +173,10 @@ function validateTransactionBalances(transactions) {
                     hypotheticalExpectedBalance = prevBalance + debit - 0;
                 }
 
-                // Does the swapped type match the actual balance?
+                if (i === 1) console.log(`[Debug i=1] Checking correction: hypotheticalExpectedBalance=${hypotheticalExpectedBalance.toFixed(2)}`);
+                
                 if (Math.abs(currentBalance - hypotheticalExpectedBalance) <= BALANCE_TOLERANCE) {
+                    if (i === 1) console.log(`[Debug i=1] Correction SUCCEEDED. Swapping type.`);
                     console.warn(`Correcting type misclassification at index ${i}: Prev Bal: ${prevBalance}, Original Credit: ${credit}, Original Debit: ${debit}, Actual Bal: ${currentBalance}. Assuming swapped type.`);
                     // Apply the correction
                     if (isOnlyDeposit) {
@@ -190,10 +202,14 @@ function validateTransactionBalances(transactions) {
                     processedTransactions.push(currentTxProcessed);
                     corrected = true;
                     // Note: mismatchCount is NOT incremented if corrected
+                } else {
+                    if (i === 1) console.log(`[Debug i=1] Correction FAILED. Balance mismatch remains.`);
                 }
+            } else {
+                 if (i === 1) console.log(`[Debug i=1] Correction not attempted (not solely deposit/withdrawal).`);
             }
-
-            // --- If Not Corrected, Flag as Mismatch ---
+            // --- End Correction Attempt ---
+            
             if (!corrected) {
                 console.warn(`Balance mismatch at index ${i}: Prev Bal: ${prevBalance}, Credit: ${credit}, Debit: ${debit}, Expected: ${expectedBalance.toFixed(2)}, Actual: ${currentBalance}. Flagging transaction:`, currentTx);
                 currentTxProcessed.balanceMismatch = true; // Set flag
