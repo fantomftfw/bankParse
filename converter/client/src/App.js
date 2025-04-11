@@ -6,7 +6,7 @@ import DownloadButton from './components/DownloadButton';
 import StatusMessage from './components/StatusMessage';
 
 function App() {
-  const [file, setFile] = useState(null); // Store the selected file object
+  const [, setFile] = useState(null); // Keep setFile if needed elsewhere, or remove entirely if not
   const [transactions, setTransactions] = useState([]); // Store preview transactions
   const [totalCount, setTotalCount] = useState(0); // Total transactions found
   const [downloadId, setDownloadId] = useState(null); // ID for downloading CSV
@@ -16,7 +16,6 @@ function App() {
   const handleFileUpload = async (selectedFile) => {
     if (isProcessing) return;
 
-    setFile(selectedFile);
     setTransactions([]);
     setTotalCount(0);
     setDownloadId(null);
