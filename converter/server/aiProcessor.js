@@ -165,6 +165,10 @@ function validateTransactionBalances(transactions) {
             const isOnlyDeposit = credit > 0 && debit === 0;
             const isOnlyWithdrawal = debit > 0 && credit === 0;
 
+            // +++ Add Logging for Mismatch Details +++
+            console.log(`[Mismatch @ index ${i}] Details: credit=${credit}, debit=${debit}, isOnlyDeposit=${isOnlyDeposit}, isOnlyWithdrawal=${isOnlyWithdrawal}`);
+            // +++ End Logging +++
+
             if (isOnlyDeposit || isOnlyWithdrawal) {
                 let hypotheticalExpectedBalance;
                 if (isOnlyDeposit) { // What if Credit was Debit?
