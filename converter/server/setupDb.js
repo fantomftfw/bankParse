@@ -1,37 +1,42 @@
 const db = require('./db');
 
 // Define Prompts
-const defaultPromptText = `
+const newDefaultPromptText = `
 Analyze the following bank statement text and extract all transaction details.
-Focus ONLY on rows representing individual transactions.
-Include the initial "Opening Balance" row if it appears as the first entry, even if Debit/Credit are zero or null.
-Ignore other summary lines, repeated headers, footers, or text outside the main transaction list.
-Format the output as a JSON array of objects. Each object MUST represent a single transaction
-and MUST contain the following keys EXACTLY:
-- "Serial no.": The transaction serial number or sequence identifier (string or null if not present).
-- "Date": The date of the transaction (YYYY-MM-DD format preferred, but keep original if ambiguous).
-- "Transaction details": The full description of the transaction (string).
-- "Debit": The amount debited (positive number or null if it's a credit).
-- "Credit": The amount credited (positive number or null if it's a debit).
-- "Balance": The account balance *after* this transaction (number).
+Focus ONLY on rows representing individual financial transactions.
+Include the initial "Opening Balance" row if present, even if monetary values are zero or null.
+Ignore summary lines, repeated headers/footers, advertisements, or text outside the main transaction table.
 
-Example object:
-{
-  "Serial no.": "123",
-  "Date": "2024-07-15",
-  "Transaction details": "Grocery Store Purchase",
-  "Debit": 55.20,
-  "Credit": null,
-  "Balance": 1450.75
-}
+Format the output as a JSON array of objects. Each object MUST represent a single transaction.
+
+Use the following primary keys where applicable:
+- "Date": The main date of the transaction (retain original format like DD/MM/YYYY or DD Mon YYYY).
+- "Value Date": The value date if available and different from the main transaction date.
+- "Description": The *full* description/narration/remarks of the transaction. Look for columns named 'Transaction details', 'Narration', or 'Transaction Remarks'.
+- "Reference No": Any reference number, cheque number, or transaction ID associated with the row. Look for columns like 'Ref No', 'Cheque no /', 'Tran Id', 'Reference or cheque no'.
+- "Balance": The account balance *after* this transaction (MUST be a number).
+
+For monetary amounts, detect the schema used by the statement:
+SCHEMA 1: Separate Debit/Credit columns.
+- "Debit": The amount debited (positive number or null). Use if a 'Debit' column exists.
+- "Credit": The amount credited (positive number or null). Use if a 'Credit' column exists.
+SCHEMA 2: Separate Withdrawal/Deposit columns.
+- "Withdrawal (Dr)": The withdrawal amount (positive number or null). Use if a 'Withdrawal (Dr)' column exists.
+- "Deposit(Cr)": The deposit amount (positive number or null). Use if a 'Deposit(Cr)' column exists.
 
 IMPORTANT RULES:
-- Ensure all monetary values are represented as numbers (e.g., 123.45, not "$123.45").
-- If a transaction is clearly a credit, the "Debit" value should be null.
-- If a transaction is clearly a debit, the "Credit" value should be null.
-- ONLY include rows that are clearly individual transactions. Do not include summaries.
-- Do NOT include any introductory text, explanations, or markdown fences (like \`\`\`json) in your response.
-Provide ONLY the JSON array.
+1. Output Keys: Your JSON object keys MUST EXACTLY match the names provided above ("Date", "Description", "Debit", "Credit", "Balance" OR "Date", "Description", "Withdrawal (Dr)", "Deposit(Cr)", "Balance"). Choose EITHER "Debit"/"Credit" OR "Withdrawal (Dr)"/"Deposit(Cr)" based on the statement's columns - DO NOT MIX THEM.
+2. Numeric Values: Ensure all monetary values ("Debit", "Credit", "Withdrawal (Dr)", "Deposit(Cr)", "Balance") are numbers (e.g., 1234.56). Remove currency symbols or commas.
+3. Nulls: If using Debit/Credit, "Debit" must be null if it's a credit, and "Credit" must be null if it's a debit. If using Withdrawal/Deposit, "Withdrawal (Dr)" must be null if it's a deposit, and "Deposit(Cr)" must be null if it's a withdrawal.
+4. Duplicate References: **CRITICAL:** Pay close attention if multiple rows share the same date and reference number. If the "Description" AND "Balance" change indicates distinct events (like an interest credit followed immediately by a related tax debit), you MUST output BOTH rows as **separate transaction objects** in the JSON.
+    * Example: If you see:
+        18/Mar/2025 | REF999 | Interest Credit | null   | 50.00 | 10050.00
+        18/Mar/2025 | REF999 | Tax Recovered   | 5.00   | null  | 10045.00
+    * Output BOTH:
+        {"Date": "18/Mar/2025", ..., "Description": "Interest Credit", "Debit": null, "Credit": 50.00, "Balance": 10050.00},
+        {"Date": "18/Mar/2025", ..., "Description": "Tax Recovered", "Debit": 5.00, "Credit": null, "Balance": 10045.00}
+5. Completeness: Extract ALL rows that appear to be valid transactions according to these rules. Transactions might not be perfectly chronological in the text; extract them as you find them.
+6. Clean Output: Provide ONLY the JSON array. Do NOT include \`\`\`json markdown fences, introductory text, or explanations.
 
 Bank Statement Text:
 --- START ---
@@ -231,7 +236,7 @@ const createTablesAndPrompts = async () => {
     await db.query(createPromptsTable);
     
     console.log('Seeding default prompt...');
-    await db.query(insertDefaultPrompt, [defaultPromptText]);
+    await db.query(insertDefaultPrompt, [newDefaultPromptText]);
     console.log('Seeding ICICI prompt...');
     await db.query(insertIciciPrompt, [iciciPromptText]);
     console.log('Seeding Equitas prompt...');

@@ -41,10 +41,14 @@ function determineHeaders(transactions) {
     if (keys.includes('Transaction Date')) headers.push({ id: 'Transaction Date', title: 'Transaction Date' });
     if (keys.includes('Transaction Posted')) headers.push({ id: 'Transaction Posted', title: 'Transaction Posted' });
     if (keys.includes('Cheque no /')) headers.push({ id: 'Cheque no /', title: 'Cheque no /' });
-    if (keys.includes('Ref No')) headers.push({ id: 'Ref No', title: 'Ref No' });
+    // Check for preferred 'Reference No' first
+    if (keys.includes('Reference No')) headers.push({ id: 'Reference No', title: 'Reference No' });
+    else if (keys.includes('Ref No')) headers.push({ id: 'Ref No', title: 'Ref No' });
+    else if (keys.includes('Reference or cheque no')) headers.push({ id: 'Reference or cheque no', title: 'Reference or cheque no' }); // Check old Equitas key too
 
-    // Description field (choose whichever exists)
-    if (keys.includes('Transaction Remarks')) headers.push({ id: 'Transaction Remarks', title: 'Transaction Remarks' });
+    // Description field (Check preferred 'Description' first)
+    if (keys.includes('Description')) headers.push({ id: 'Description', title: 'Description' });
+    else if (keys.includes('Transaction Remarks')) headers.push({ id: 'Transaction Remarks', title: 'Transaction Remarks' });
     else if (keys.includes('Narration')) headers.push({ id: 'Narration', title: 'Narration' });
     else if (keys.includes('Transaction details')) headers.push({ id: 'Transaction details', title: 'Transaction details' });
 
