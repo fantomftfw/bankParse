@@ -115,11 +115,19 @@ Example object (adjust values as needed):
   "Balance": 25000.75
 }
 
+// Example of handling separate transactions with the same reference:
+// If you see:
+// 18/Mar/2025 | REF999 | Interest Credit | null   | 50.00 | 10050.00
+// 18/Mar/2025 | REF999 | Tax Recovered   | 5.00   | null  | 10045.00
+// Output BOTH as separate objects:
+// {"Transaction Date": "18/Mar/2025", ..., "Narration": "Interest Credit", "Debit": null, "Credit": 50.00, "Balance": 10050.00},
+// {"Transaction Date": "18/Mar/2025", ..., "Narration": "Tax Recovered", "Debit": 5.00, "Credit": null, "Balance": 10045.00}
+
 IMPORTANT RULES:
 - Ensure all monetary values ("Debit", "Credit", "Balance") are represented strictly as numbers (e.g., 1234.56, not "1,234.56"). Remove any commas or currency symbols.
 - If a transaction is clearly a credit, the "Debit" value MUST be null.
 - If a transaction is clearly a debit, the "Credit" value MUST be null.
-- Pay close attention to lines with the same date and reference number. If the narration and balance change indicate distinct events (e.g., an interest credit followed by a tax debit), treat them as separate transactions, even if the reference number is identical.
+- **CRITICAL:** Pay close attention to lines with the same date and reference number. If the narration AND balance change indicate distinct events (like an interest credit followed immediately by a tax debit), you MUST treat them as **separate transactions** in the JSON output, even if the reference number is identical. Check the example above.
 - ONLY include rows that are clearly individual transactions. Do not include summaries.
 - Do NOT include any introductory text, explanations, or markdown fences (like \`\`\`json) in your response.
 - Provide ONLY the JSON array.
