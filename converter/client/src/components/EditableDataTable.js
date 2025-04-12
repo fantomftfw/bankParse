@@ -32,8 +32,18 @@ function EditableDataTable({ data, runId }) {
   }
 
   // Get headers from the keys of the first transaction object
-  // Assuming all objects have the same keys
-  const headers = Object.keys(editedData[0] || {});
+  // Assuming all objects have the same keys - MODIFIED: Ensure flag columns are present
+  let headers = Object.keys(editedData[0] || {});
+  if (editedData.length > 0) { // Only add if there's data
+      if (!headers.includes('Balance Mismatch')) {
+          console.log("Adding 'Balance Mismatch' header");
+          headers.push('Balance Mismatch');
+      }
+      if (!headers.includes('Type Corrected')) {
+          console.log("Adding 'Type Corrected' header");
+          headers.push('Type Corrected');
+      }
+  }
 
   // --- Pagination Logic ---
   const totalRows = editedData.length;
@@ -240,7 +250,7 @@ function EditableDataTable({ data, runId }) {
                           autoFocus
                         />
                       ) : (
-                        typeof row[header] === 'boolean' ? row[header].toString() : row[header]
+                        typeof row[header] === 'boolean' ? row[header].toString() : (row[header] ?? '') 
                       )}
                     </td>
                   );
