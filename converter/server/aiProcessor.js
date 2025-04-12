@@ -455,4 +455,5 @@ async function extractTransactionsWithAI(textContent, bankIdentifier) {
     }
 }
 
-module.exports = { identifyBankWithAI, extractTransactionsWithAI }; 
+// Export the necessary functions
+module.exports = { identifyBankWithAI, extractTransactionsWithAI, validateTransactionBalances }; 
