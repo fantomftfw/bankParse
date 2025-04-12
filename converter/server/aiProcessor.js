@@ -433,18 +433,19 @@ async function extractTransactionsWithAI(textContent, bankIdentifier) {
 
         console.log(`AI successfully parsed ${parsedTransactions.length} potential transactions.`);
 
-        // Validate transaction structure and balances, flagging inconsistencies
-        const validatedTransactions = validateTransactionBalances(parsedTransactions);
+        // REMOVE VALIDATION FROM HERE - It will be done once on the full list later
+        // const validatedTransactions = validateTransactionBalances(parsedTransactions);
 
         // Log based on flags instead of filtering
-        const consistentTransactions = validatedTransactions.filter(tx => !tx.balanceMismatch);
-        const correctedCount = validatedTransactions.filter(tx => tx.correctedType).length;
-        console.log(`Processed ${validatedTransactions.length} transactions. ${consistentTransactions.length} appear consistent. ${correctedCount} type misclassifications corrected.`);
+        // const consistentTransactions = validatedTransactions.filter(tx => !tx.balanceMismatch);
+        // const correctedCount = validatedTransactions.filter(tx => tx.correctedType).length;
+        // console.log(`Processed ${validatedTransactions.length} transactions. ${consistentTransactions.length} appear consistent. ${correctedCount} type misclassifications corrected.`);
 
         // Attach promptId to the result if needed downstream (e.g., for saving ProcessingResults)
         // validatedTransactions = validatedTransactions.map(tx => ({ ...tx, _promptIdUsed: promptId }));
 
-        return validatedTransactions; 
+        // Return the RAW parsed transactions for this page
+        return parsedTransactions; 
 
     } catch (error) {
         // Log the specific error from the API call or parsing/validation
