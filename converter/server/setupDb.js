@@ -187,8 +187,12 @@ const createTablesAndPrompts = async () => {
   const insertDefaultPrompt = `
     INSERT INTO Prompts (bank_identifier, prompt_text, is_default, is_active, version)
     VALUES (NULL, $1, true, true, 1)
-    ON CONFLICT (bank_identifier) WHERE bank_identifier IS NULL DO NOTHING;
-  `; // Use ON CONFLICT for default (where identifier is NULL)
+    ON CONFLICT (bank_identifier) WHERE bank_identifier IS NULL DO UPDATE SET
+      prompt_text = EXCLUDED.prompt_text,
+      version = Prompts.version + 1,
+      is_active = true,
+      created_at = NOW();
+  `; // Use ON CONFLICT...DO UPDATE to ensure the default prompt text is updated
 
   // Insert ICICI Prompt
   const insertIciciPrompt = `
