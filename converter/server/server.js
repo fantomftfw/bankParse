@@ -197,21 +197,48 @@ function cleanTransactionKeys(transactions) {
 }
 
 /**
- * Corrects Debit/Credit classification based on running balance changes.
+ * Finds the most likely key names for balance, debit, and credit columns by scanning all transactions.
+ * @param {Array<object>} transactions - Array of transaction objects.
+ * @returns {{balanceKey: string|null, debitKey: string|null, creditKey: string|null}}
+ */
+function findTransactionKeys(transactions) {
+    let balanceKey = null;
+    let debitKey = null;
+    let creditKey = null;
+    const potentialBalanceKeys = new Set();
+    const potentialDebitKeys = new Set();
+    const potentialCreditKeys = new Set();
+
+    // Scan all transactions to find potential keys
+    for (const tx of transactions) {
+        if (typeof tx === 'object' && tx !== null) {
+            for (const key in tx) {
+                const lowerKey = key.toLowerCase();
+                if (lowerKey.includes('balance')) potentialBalanceKeys.add(key);
+                if (lowerKey.includes('debit') || lowerKey.includes('withdra')) potentialDebitKeys.add(key);
+                if (lowerKey.includes('credit') || lowerKey.includes('deposit')) potentialCreditKeys.add(key);
+            }
+        }
+    }
+
+    // Prioritize common/exact names if found
+    balanceKey = [...potentialBalanceKeys].find(k => k.toLowerCase() === 'balance') || [...potentialBalanceKeys][0] || null;
+    debitKey = [...potentialDebitKeys].find(k => k.toLowerCase() === 'debit') || [...potentialDebitKeys].find(k => k.toLowerCase().includes('withdra')) || [...potentialDebitKeys][0] || null;
+    creditKey = [...potentialCreditKeys].find(k => k.toLowerCase() === 'credit') || [...potentialCreditKeys].find(k => k.toLowerCase().includes('deposit')) || [...potentialCreditKeys][0] || null;
+    
+    return { balanceKey, debitKey, creditKey };
+}
+
+/**
+ * Corrects Debit/Credit classification based on running balance changes using dynamically found keys.
  * Adds flags: `balanceCorrectedType` and `balanceMismatch`.
  * Assumes transactions are chronologically sorted.
- * @param {Array<object>} transactions Raw transactions from AI.
+ * @param {Array<object>} transactions Raw transactions from AI (with cleaned keys).
  * @returns {Array<object>} Transactions with corrected types and flags.
  */
 function correctTransactionTypesByBalance(transactions) {
     if (!transactions || transactions.length < 2) {
-        // Cannot perform comparison with less than 2 transactions
-        // Add flags defaulting to false if desired for consistency
-        return transactions.map(tx => ({
-             ...tx, 
-             balanceCorrectedType: false,
-             balanceMismatch: false 
-            }));
+        return transactions.map(tx => ({ ...tx, balanceCorrectedType: false, balanceMismatch: false }));
     }
 
     console.log('[Balance Check] Starting balance correction...');
@@ -219,58 +246,48 @@ function correctTransactionTypesByBalance(transactions) {
     let correctionsMade = 0;
     let mismatchesFound = 0;
 
-    // --- Find Dynamic Column Names (using first transaction as reference) --- 
-    let balanceKey = null;
-    let debitKey = null;
-    let creditKey = null;
-    if (transactions.length > 0 && typeof transactions[0] === 'object') {
-        const keys = Object.keys(transactions[0]);
-        // Find keys case-insensitively, prioritizing common names
-        balanceKey = keys.find(k => k.toLowerCase().includes('balance')) || null;
-        debitKey = keys.find(k => k.toLowerCase().includes('debit') || k.toLowerCase().includes('withdra')) || null;
-        creditKey = keys.find(k => k.toLowerCase().includes('credit') || k.toLowerCase().includes('deposit')) || null;
-    }
+    // --- Find Dynamic Column Names Globally --- 
+    const { balanceKey, debitKey, creditKey } = findTransactionKeys(transactions);
 
     if (!balanceKey || !debitKey || !creditKey) {
-        console.error(`[Balance Check] CRITICAL: Could not find required keys for balance check (Balance: ${balanceKey}, Debit: ${debitKey}, Credit: ${creditKey}). Aborting check.`);
-        // Return transactions without checks but with flags added
+        console.error(`[Balance Check] CRITICAL: Could not find required keys globally (Balance: ${balanceKey}, Debit: ${debitKey}, Credit: ${creditKey}). Aborting check.`);
         return transactions.map(tx => ({ ...tx, balanceCorrectedType: false, balanceMismatch: true }));
     }
     console.log(`[Balance Check] Using keys - Balance: '${balanceKey}', Debit: '${debitKey}', Credit: '${creditKey}'`);
     // --- End Finding Dynamic Column Names ---
 
-    // Add the first transaction - cannot be checked against a previous one
-    correctedTransactions.push({ 
-        ...transactions[0],
-        balanceCorrectedType: false,
-        balanceMismatch: false 
-    });
+    // Add the first transaction
+    correctedTransactions.push({ ...transactions[0], balanceCorrectedType: false, balanceMismatch: false });
 
     for (let i = 1; i < transactions.length; i++) {
         const prevTx = correctedTransactions[i - 1]; 
         const currentTx = { ...transactions[i], balanceCorrectedType: false, balanceMismatch: false }; 
 
-        // Use dynamic keys found earlier
+        // Use globally found dynamic keys
         const prevBalance = parseCurrency(prevTx[balanceKey]);
         const currentBalance = parseCurrency(currentTx[balanceKey]);
-        const debitAmount = parseCurrency(currentTx[debitKey]);
-        const creditAmount = parseCurrency(currentTx[creditKey]);
+        // Important: Use || 0 to handle cases where AI might return null/undefined for the correct key
+        const debitAmount = parseCurrency(currentTx[debitKey] || 0);
+        const creditAmount = parseCurrency(currentTx[creditKey] || 0);
 
-        // Determine the transaction amount reported by AI
+        // Determine the transaction amount reported by AI (handle potential zero values correctly)
         let reportedAmount = NaN;
-        if (!isNaN(debitAmount) && debitAmount > 0) {
+        if (!isNaN(debitAmount) && debitAmount !== 0) {
             reportedAmount = debitAmount;
-        } else if (!isNaN(creditAmount) && creditAmount > 0) {
+        } else if (!isNaN(creditAmount) && creditAmount !== 0) {
             reportedAmount = creditAmount;
-        } else if (!isNaN(debitAmount) && debitAmount === 0 && isNaN(creditAmount)){
-             reportedAmount = 0; // Allow zero amount debits if credit is NaN/null
-        } else if (!isNaN(creditAmount) && creditAmount === 0 && isNaN(debitAmount)){
-             reportedAmount = 0; // Allow zero amount credits if debit is NaN/null
-        } // Note: Ignores rows where both are null/NaN/non-zero
+        } else if (!isNaN(debitAmount) && !isNaN(creditAmount) && debitAmount === 0 && creditAmount === 0) {
+            reportedAmount = 0; // Both are zero
+        } else if (!isNaN(debitAmount) && debitAmount === 0 && isNaN(creditAmount)) {
+            reportedAmount = 0; // Debit is zero, Credit is missing
+        } else if (!isNaN(creditAmount) && creditAmount === 0 && isNaN(debitAmount)) {
+            reportedAmount = 0; // Credit is zero, Debit is missing
+        } // Leaves reportedAmount as NaN if only one exists and it's zero, or if both are NaN
 
         if (isNaN(prevBalance) || isNaN(currentBalance) || isNaN(reportedAmount)) {
-            console.warn(`[Balance Check] Skipping check for row ${i + 1}: Unparseable numbers. PrevBal: ${prevTx[balanceKey]}, CurrBal: ${currentTx[balanceKey]}, Debit: ${currentTx[debitKey]}, Credit: ${currentTx[creditKey]}`);
-            currentTx.balanceMismatch = true; // Cannot validate
+            // Use dynamic keys in the log message
+            console.warn(`[Balance Check] Skipping check for row ${i + 1}: Unparseable numbers. PrevBal: ${prevTx[balanceKey]}, CurrBal: ${currentTx[balanceKey]}, DebitKey ('${debitKey}'): ${currentTx[debitKey]}, CreditKey ('${creditKey}'): ${currentTx[creditKey]}`);
+            currentTx.balanceMismatch = true; 
             mismatchesFound++;
             correctedTransactions.push(currentTx);
             continue;
@@ -278,13 +295,13 @@ function correctTransactionTypesByBalance(transactions) {
 
         const balanceDiff = currentBalance - prevBalance;
 
-        // Check if balance difference matches the reported amount (positive or negative)
+        // Check if balance difference matches the reported amount
         if (Math.abs(balanceDiff - reportedAmount) <= BALANCE_TOLERANCE) {
             // Balance increased by amount - Should be CREDIT
             if (currentTx[debitKey] !== null || isNaN(creditAmount)) { 
                 console.log(`[Balance Check] Correcting row ${i + 1} to CREDIT. Balance increased.`); 
-                currentTx[creditKey] = reportedAmount; // Update dynamic key
-                currentTx[debitKey] = null;          // Update dynamic key
+                currentTx[creditKey] = reportedAmount; 
+                currentTx[debitKey] = null;          
                 currentTx.balanceCorrectedType = true;
                 correctionsMade++;
             }
@@ -292,14 +309,14 @@ function correctTransactionTypesByBalance(transactions) {
             // Balance decreased by amount - Should be DEBIT
             if (currentTx[creditKey] !== null || isNaN(debitAmount)) { 
                 console.log(`[Balance Check] Correcting row ${i + 1} to DEBIT. Balance decreased.`); 
-                currentTx[debitKey] = reportedAmount;  // Update dynamic key
-                currentTx[creditKey] = null;         // Update dynamic key
+                currentTx[debitKey] = reportedAmount;  
+                currentTx[creditKey] = null;         
                 currentTx.balanceCorrectedType = true;
                 correctionsMade++;
             }
         } else {
             // Balance change does not match the reported amount
-            console.warn(`[Balance Check] Mismatch for row ${i + 1}. PrevBal: ${prevBalance.toFixed(2)}, CurrBal: ${currentBalance.toFixed(2)}, Diff: ${balanceDiff.toFixed(2)}, Amount: ${reportedAmount.toFixed(2)}`);
+            console.warn(`[Balance Check] Mismatch for row ${i + 1}. PrevBal: ${prevBalance.toFixed(2)}, CurrBal: ${currentBalance.toFixed(2)}, Diff: ${balanceDiff.toFixed(2)}, Amount ('${debitKey}'/'${creditKey}'): ${reportedAmount.toFixed(2)}`);
             currentTx.balanceMismatch = true;
             mismatchesFound++;
         }
