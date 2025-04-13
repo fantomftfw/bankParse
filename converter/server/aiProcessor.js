@@ -90,14 +90,17 @@ function normalizeTransactionData(rawTransactions) {
             invalidStructure: tx.invalidStructure || false,
         };
 
-        // 1. Date (Prefer 'date', fallback to 'Transaction Date', then 'Value Date')
+        // 1. Date (Prefer 'date', fallback to 'Transaction Date', then 'Value Date', then 'Date')
         if (typeof tx.date === 'string' && tx.date.length > 0) {
-            normalizedTx.date = tx.date; // TODO: Add robust date parsing/formatting here if needed
+            normalizedTx.date = tx.date; // Default schema key
         } else if (typeof tx['Transaction Date'] === 'string' && tx['Transaction Date'].length > 0) {
-            normalizedTx.date = tx['Transaction Date']; // TODO: Format?
+            normalizedTx.date = tx['Transaction Date']; // Equitas style
         } else if (typeof tx['Value Date'] === 'string' && tx['Value Date'].length > 0) {
-            normalizedTx.date = tx['Value Date']; // TODO: Format?
+            normalizedTx.date = tx['Value Date']; // Equitas/ICICI style
+        } else if (typeof tx.Date === 'string' && tx.Date.length > 0) { // Added check for ICICI style (capital D)
+            normalizedTx.date = tx.Date;
         }
+        // TODO: Add robust date parsing/formatting to YYYY-MM-DD here, regardless of input format
 
         // 2. Description (Prefer 'description', fallback to others)
         if (typeof tx.description === 'string') {
