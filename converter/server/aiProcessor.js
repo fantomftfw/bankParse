@@ -76,7 +76,7 @@ function validateTransactionBalances(transactions) {
     const processedTransactions = [];
     let mismatchCount = 0; // Count mismatches
 
-    // Process the first transaction - assume it's valid or has no prior to check against
+    // Process the first transaction
     const firstTx = transactions[0];
     if (isValidTransaction(firstTx)) {
          // Add balanceMismatch flag, default to false
@@ -89,139 +89,67 @@ function validateTransactionBalances(transactions) {
 
 
     for (let i = 1; i < transactions.length; i++) {
-        // Compare against the *previous transaction from the AI's list*
-        const prevTx = transactions[i-1];
+        // Compare against the *previous VALID transaction from the PROCESSED list*
+        const prevProcessedTx = processedTransactions[processedTransactions.length - 1]; // Get the last valid processed tx
         const currentTx = transactions[i];
         let currentTxProcessed = {...currentTx, balanceMismatch: false}; // Assume valid first
 
         if (!isValidTransaction(currentTx)) {
-             console.warn(`Transaction at index ${i} has invalid structure:`, currentTx);
-             currentTxProcessed.balanceMismatch = true; // Mark as problematic
-             currentTxProcessed.invalidStructure = true;
-             processedTransactions.push(currentTxProcessed);
+             console.warn(`Transaction at original index ${i} has invalid structure:`, currentTx);
+             // Don't push invalid ones to processed list if they break validation flow
+             // currentTxProcessed.balanceMismatch = true; // Mark as problematic
+             // currentTxProcessed.invalidStructure = true;
+             // processedTransactions.push(currentTxProcessed);
              mismatchCount++; // Count structure issues as mismatches for logging
              continue; // Move to next transaction
         }
 
         // Ensure we have a valid previous transaction structure to compare against
-        if (!isValidTransaction(prevTx)) {
-            console.warn(`Cannot validate balance for transaction at index ${i} because previous transaction (index ${i-1}) was invalid. Marking as potential mismatch.`, currentTx);
+        if (!prevProcessedTx || !isValidTransaction(prevProcessedTx)) {
+            console.warn(`Cannot validate balance for transaction at original index ${i} because no valid previous transaction exists. Marking current as potential mismatch.`, currentTx);
             currentTxProcessed.balanceMismatch = true;
-            processedTransactions.push(currentTxProcessed);
+            processedTransactions.push(currentTxProcessed); // Push even if prev invalid, but flag it
             mismatchCount++;
             continue;
         }
 
-        const prevBalance = parseFloat(prevTx.Balance);
-        const currentBalance = parseFloat(currentTxProcessed.Balance); 
-        
-        // Determine which set of keys to use for credit/debit
-        let credit = 0;
-        let debit = 0;
-        if (currentTxProcessed['Deposit(Cr)'] !== undefined || currentTxProcessed['Withdrawal (Dr)'] !== undefined) {
-            // Use Dr/Cr schema
-            credit = parseFloat(currentTxProcessed['Deposit(Cr)']) || 0;
-            debit = parseFloat(currentTxProcessed['Withdrawal (Dr)']) || 0;
-            // console.log(`  -> Using Dr/Cr keys for index ${i}`);
-        } else if (currentTxProcessed['Credit'] !== undefined || currentTxProcessed['Debit'] !== undefined) {
-            // Use Debit/Credit schema
-            credit = parseFloat(currentTxProcessed['Credit']) || 0;
-            debit = parseFloat(currentTxProcessed['Debit']) || 0;
-            // console.log(`  -> Using Debit/Credit keys for index ${i}`);
-        } else {
-            // Likely Opening Balance or row with no monetary change - values default to 0
-            // console.log(`  -> No Debit/Credit/Dr/Cr keys found for index ${i}`);
-        }
+        // USE NEW FIELD NAMES
+        const prevBalance = parseFloat(prevProcessedTx.running_balance); 
+        const currentBalance = parseFloat(currentTxProcessed.running_balance);
+        const amount = parseFloat(currentTxProcessed.amount); // Amount is always positive
+        const type = currentTxProcessed.type; // "credit" or "debit"
 
-        // Check for NaN *after* attempting to parse potential keys
-        if (isNaN(prevBalance) || isNaN(currentBalance) || isNaN(credit) || isNaN(debit)) {
-            console.warn(`Skipping balance validation for transaction at index ${i} due to non-numeric values. Marking as potential mismatch:`, currentTx);
+        if (isNaN(prevBalance) || isNaN(currentBalance) || isNaN(amount) || (type !== 'credit' && type !== 'debit')) {
+            console.warn(`Skipping balance validation for transaction at original index ${i} due to non-numeric values or invalid type. Marking as potential mismatch:`, currentTx);
             currentTxProcessed.balanceMismatch = true; // Mark as problematic due to data issue
             processedTransactions.push(currentTxProcessed);
             mismatchCount++;
             continue; // Move to next transaction
         }
 
-        const expectedBalance = prevBalance + credit - debit;
-
-        // Remove detailed logging, keep only mismatch summary
-        // console.log(`[Debug i=${i}] PrevTx:`, JSON.stringify(prevTx));
-        // console.log(`[Debug i=${i}] CurrentTx Raw:`, JSON.stringify(currentTx));
-        // console.log(`[Debug i=${i}] Values: prevBalance=${prevBalance}, currentBalance=${currentBalance}, credit=${credit}, debit=${debit}, expectedBalance=${expectedBalance.toFixed(2)}`);
+        // CALCULATE EXPECTED BALANCE USING NEW FIELDS
+        let expectedBalance;
+        if (type === 'credit') {
+            expectedBalance = prevBalance + amount;
+        } else { // type === 'debit'
+            expectedBalance = prevBalance - amount;
+        }
 
         // Check if the current balance matches the expected balance within tolerance
         if (Math.abs(currentBalance - expectedBalance) <= BALANCE_TOLERANCE) {
-            // console.log(`[Debug i=${i}] Initial balance check PASSED.`);
-            // Balance matches, push as is (balanceMismatch is already false)
             processedTransactions.push(currentTxProcessed);
         } else {
-            // console.log(`[Debug i=${i}] Initial balance check FAILED.`);
-            // --- Attempt Correction for Type Misclassification ---
-            let corrected = false;
-            // Check if it was reported as only deposit or only withdrawal *using the detected keys*
-            const isOnlyDeposit = credit > 0 && debit === 0;
-            const isOnlyWithdrawal = debit > 0 && credit === 0;
-
-            // Log details ONLY on mismatch
-            console.log(`[Mismatch @ index ${i}] Details: credit=${credit}, debit=${debit}, isOnlyDeposit=${isOnlyDeposit}, isOnlyWithdrawal=${isOnlyWithdrawal}`);
-
-            if (isOnlyDeposit || isOnlyWithdrawal) {
-                let hypotheticalExpectedBalance;
-                if (isOnlyDeposit) { // What if Credit was Debit?
-                    hypotheticalExpectedBalance = prevBalance + 0 - credit;
-                } else { // What if Debit was Credit?
-                    hypotheticalExpectedBalance = prevBalance + debit - 0;
-                }
-                
-                // console.log(`[Debug i=${i}] Checking correction: hypotheticalExpectedBalance=${hypotheticalExpectedBalance.toFixed(2)}`);
-                
-                if (Math.abs(currentBalance - hypotheticalExpectedBalance) <= BALANCE_TOLERANCE) {
-                    // console.log(`[Debug i=${i}] Correction SUCCEEDED. Swapping type.`);
-                    console.warn(`Correcting type misclassification at index ${i}: Prev Bal: ${prevBalance}, Original Credit: ${credit}, Original Debit: ${debit}, Actual Bal: ${currentBalance}. Assuming swapped type.`);
-                    // Apply the correction
-                    if (isOnlyDeposit) {
-                        // Check which schema was used to apply correctly
-                        if (currentTxProcessed['Deposit(Cr)'] !== undefined) {
-                             currentTxProcessed['Withdrawal (Dr)'] = credit;
-                             currentTxProcessed['Deposit(Cr)'] = null;
-                        } else {
-                             currentTxProcessed['Debit'] = credit;
-                             currentTxProcessed['Credit'] = null;
-                        }
-                    } else { // isOnlyWithdrawal
-                        if (currentTxProcessed['Withdrawal (Dr)'] !== undefined) {
-                             currentTxProcessed['Deposit(Cr)'] = debit;
-                             currentTxProcessed['Withdrawal (Dr)'] = null;
-                        } else {
-                             currentTxProcessed['Credit'] = debit;
-                             currentTxProcessed['Debit'] = null;
-                        }
-                    }
-                    currentTxProcessed.balanceMismatch = false; // Resolved the mismatch
-                    currentTxProcessed.correctedType = true; // Add flag indicating correction
-                    processedTransactions.push(currentTxProcessed);
-                    corrected = true;
-                    // Note: mismatchCount is NOT incremented if corrected
-                } else {
-                    // console.log(`[Debug i=${i}] Correction FAILED. Balance mismatch remains.`);
-                }
-            } else {
-                 // console.log(`[Debug i=${i}] Correction not attempted (not solely deposit/withdrawal).`);
-            }
-            // --- End Correction Attempt ---
-            
-            if (!corrected) {
-                console.warn(`Balance mismatch at index ${i}: Prev Bal: ${prevBalance}, Credit: ${credit}, Debit: ${debit}, Expected: ${expectedBalance.toFixed(2)}, Actual: ${currentBalance}. Flagging transaction:`, currentTx);
+            // Balance mismatch - Log and flag
+            console.warn(`Balance mismatch at original index ${i}: Prev Bal: ${prevBalance}, Amount: ${amount}, Type: ${type}, Expected: ${expectedBalance.toFixed(2)}, Actual: ${currentBalance}. Flagging transaction:`, currentTx);
                 currentTxProcessed.balanceMismatch = true; // Set flag
-                currentTxProcessed.correctedType = false; // Explicitly false
+            // No correction attempt needed with this simpler structure
                 processedTransactions.push(currentTxProcessed);
                 mismatchCount++;
-            }
         }
     }
 
     if (mismatchCount > 0) {
-         console.warn(`Flagged ${mismatchCount} transactions due to balance mismatches or structural issues.`);
+         console.warn(`Flagged ${mismatchCount} transactions due to balance mismatches or structural issues (out of ${transactions.length} total received).`);
     }
 
     return processedTransactions; // Return all transactions, with flags
@@ -233,39 +161,15 @@ function validateTransactionBalances(transactions) {
  * @returns {boolean} True if required fields are present, false otherwise.
  */
 function isValidTransaction(tx) {
-    if (!tx || tx.Balance === undefined) {
-        return false; // Must have an object and a Balance
-    }
+    if (!tx || typeof tx !== 'object') return false;
 
-    // Check for at least one valid description key
-    const hasDescription = tx['Transaction Remarks'] !== undefined || 
-                           tx['Transaction details'] !== undefined || 
-                           tx['Narration'] !== undefined ||
-                           tx['Description'] !== undefined;
+    const hasDate = typeof tx.date === 'string' && tx.date.length > 0; // Basic check
+    const hasDescription = typeof tx.description === 'string' && tx.description.length > 0;
+    const hasAmount = typeof tx.amount === 'number' && !isNaN(tx.amount);
+    const hasType = tx.type === 'credit' || tx.type === 'debit';
+    const hasRunningBalance = typeof tx.running_balance === 'number' && !isNaN(tx.running_balance);
 
-    if (!hasDescription) {
-        return false;
-    }
-
-    // Check for monetary values OR explicitly allow if both sets are missing/null/zero (Opening Balance case)
-    const hasWithdrawalDr = tx['Withdrawal (Dr)'] !== null && tx['Withdrawal (Dr)'] !== undefined;
-    const hasDepositCr = tx['Deposit(Cr)'] !== null && tx['Deposit(Cr)'] !== undefined;
-    const hasDebit = tx['Debit'] !== null && tx['Debit'] !== undefined;
-    const hasCredit = tx['Credit'] !== null && tx['Credit'] !== undefined;
-
-    const withdrawalAmount = parseFloat(tx['Withdrawal (Dr)']) || 0;
-    const depositAmount = parseFloat(tx['Deposit(Cr)']) || 0;
-    const debitAmount = parseFloat(tx['Debit']) || 0;
-    const creditAmount = parseFloat(tx['Credit']) || 0;
-
-    const hasDrCrActivity = (hasWithdrawalDr && withdrawalAmount !== 0) || (hasDepositCr && depositAmount !== 0);
-    const hasDebitCreditActivity = (hasDebit && debitAmount !== 0) || (hasCredit && creditAmount !== 0);
-
-    const isOpeningBalance = (!hasWithdrawalDr && !hasDepositCr && !hasDebit && !hasCredit) || 
-                             (withdrawalAmount === 0 && depositAmount === 0 && debitAmount === 0 && creditAmount === 0);
-
-    // Valid if it has balance, description, AND (EITHER monetary activity OR it's an opening balance type)
-    return (hasDrCrActivity || hasDebitCreditActivity || isOpeningBalance);
+    return hasDate && hasDescription && hasAmount && hasType && hasRunningBalance;
 }
 
 /**
@@ -374,62 +278,49 @@ async function extractTransactionsWithAI(textContent, bankIdentifier) {
     
     if (!textContent) {
         console.warn("AI Processor: Received empty text content.");
-        return [];
+        return []; // Return empty array for transactions
     }
 
     try {
         console.log('[AI Extract] Sending request to Gemini AI...');
-        // Use the PRO model for extraction
         const result = await extractionModel.generateContent(promptToUse); 
         const response = result.response;
         const jsonText = response.text();
 
         console.log("Received response from Gemini AI.");
-        
-        // --- Add Logging for Raw Response --- 
         console.log(`\n--- Raw AI Response (Length: ${jsonText?.length}) ---\n${jsonText}\n---\n`);
-        // --- End Logging --- 
         
         if (!jsonText) {
              console.error("AI response text is empty.");
              throw new Error("AI returned an empty response.");
         }
 
-        let parsedTransactions;
+        let parsedData;
         try {
-            parsedTransactions = JSON.parse(jsonText);
+            parsedData = JSON.parse(jsonText);
         } catch (parseError) {
              console.error("Failed to parse AI JSON response:", parseError);
-             console.error("\n--- Raw AI response text (Failed Parse) ---\n", jsonText, "\n---"); // Log raw response
+             console.error("\n--- Raw AI response text (Failed Parse) ---\n", jsonText, "\n---");
             throw new Error(`Failed to parse AI response as JSON: ${parseError.message}`);
         }
 
-        if (!Array.isArray(parsedTransactions)) {
-             console.error("AI response was not a JSON array. Response:", parsedTransactions);
-             console.error("\n--- Raw AI response text (Not Array) ---\n", jsonText, "\n---"); // Log raw response
-            throw new Error('AI response was not in the expected JSON array format.');
+        // VALIDATE THE NEW TOP-LEVEL STRUCTURE
+        if (typeof parsedData !== 'object' || parsedData === null || !Array.isArray(parsedData.transactions) || !Array.isArray(parsedData.balances)) {
+             console.error("AI response was not the expected JSON object with 'transactions' and 'balances' arrays. Response:", parsedData);
+             console.error("\n--- Raw AI response text (Invalid Structure) ---\n", jsonText, "\n---");
+            throw new Error('AI response did not match the expected {transactions: [], balances: []} structure.');
         }
 
-        console.log(`AI successfully parsed ${parsedTransactions.length} potential transactions.`);
+        const transactions = parsedData.transactions; // Extract the transactions array
+        // const balances = parsedData.balances; // Balances array is available if needed later
 
-        // REMOVE VALIDATION FROM HERE - It will be done once on the full list later
-        // const validatedTransactions = validateTransactionBalances(parsedTransactions);
+        console.log(`AI successfully parsed ${transactions.length} potential transactions.`);
 
-        // Log based on flags instead of filtering
-        // const consistentTransactions = validatedTransactions.filter(tx => !tx.balanceMismatch);
-        // const correctedCount = validatedTransactions.filter(tx => tx.correctedType).length;
-        // console.log(`Processed ${validatedTransactions.length} transactions. ${consistentTransactions.length} appear consistent. ${correctedCount} type misclassifications corrected.`);
-
-        // Attach promptId to the result if needed downstream (e.g., for saving ProcessingResults)
-        // validatedTransactions = validatedTransactions.map(tx => ({ ...tx, _promptIdUsed: promptId }));
-
-        // Return the RAW parsed transactions for this page
-        return parsedTransactions; 
+        // Pass only the transactions array to the validation function
+        return transactions; 
 
     } catch (error) {
-        // Log the specific error from the API call or parsing/validation
         console.error("Error during AI transaction processing:", error);
-        // Re-throw a more specific error for the caller
         throw new Error(`Failed to process transactions with AI: ${error.message}`);
     }
 }

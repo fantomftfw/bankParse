@@ -258,23 +258,26 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
 
         // --- Validate ALL transactions together --- <<<< NEW STEP >>>>
         console.log('Validating all transactions together...');
-        const finalValidatedTransactions = validateTransactionBalances(allRawTransactions);
-        const validationFlags = finalValidatedTransactions.map((tx, index) => ({
-            index: index,
+        const validatedTransactionsWithFlags = validateTransactionBalances(allRawTransactions);
+        // Filter out structurally invalid transactions before saving/further processing if desired?
+        // const structurallyValidTransactions = validatedTransactionsWithFlags.filter(isValidTransaction); 
+        // For now, keep all flagged transactions, just separate flags for DB storage
+        const finalTransactionDataForDb = validatedTransactionsWithFlags;
+        
+        const validationFlags = finalTransactionDataForDb.map((tx, index) => ({
+            index: index, // Keep original index for reference if needed?
             balanceMismatch: tx.balanceMismatch || false,
-            correctedType: tx.correctedType || false,
-            invalidStructure: tx.invalidStructure || false
-        })).filter(f => f.balanceMismatch || f.correctedType || f.invalidStructure);
+            // correctedType: tx.correctedType || false, // No longer attempting correction
+            invalidStructure: tx.invalidStructure || false // Might still be flagged if initial check fails
+        })).filter(f => f.balanceMismatch || f.invalidStructure);
+        
         console.log(`Validation complete. ${validationFlags.length} flags raised.`);
-        // --- End Validation Step --- 
+        // --- End Validation Step ---
 
         // --- Store result and get run ID --- 
         let runId = null;
-        if (finalValidatedTransactions.length > 0) { // <-- Use validated length
+        if (finalTransactionDataForDb.length > 0) { // <-- Use validated length
             try {
-                // Separate flags from data for clarity in DB (already done above)
-                // const flagsRaised = ... 
-
                 const insertQuery = `
                     INSERT INTO ProcessingResults 
                     (original_pdf_name, initial_ai_result_json, flags_raised_json, ai_model_used, prompt_used_id)
@@ -283,8 +286,8 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
                 `;
                 const values = [
                     req.file.originalname, 
-                    JSON.stringify(finalValidatedTransactions), // <-- Store FINAL validated data
-                    JSON.stringify(validationFlags), // <-- Store calculated flags
+                    JSON.stringify(finalTransactionDataForDb), // <-- Store FINAL data (incl. flags)
+                    JSON.stringify(validationFlags), 
                     'gemini-1.5-pro', // Hardcode model for now, could get from aiProcessor later
                     promptIdUsed // Store the ID of the prompt used (Needs to be passed back from extract) - currently null
                 ];
@@ -296,24 +299,22 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
 
             } catch (dbError) {
                 console.error('Error saving processing result to database:', dbError);
-                // Decide if this should be a fatal error for the request
-                // For now, log it but allow CSV generation/download to proceed
             }
         }
 
         // --- CSV Generation (Task 11) ---
-        // Use a portion of the original PDF filename for the CSV ID
         const baseFileId = path.basename(req.file.filename, path.extname(req.file.filename));
-        const csvFilePath = await generateCsv(finalValidatedTransactions, baseFileId); // <-- Use FINAL validated data
+        // Generate CSV from the potentially flagged data
+        const csvFilePath = await generateCsv(finalTransactionDataForDb, baseFileId); 
         const downloadId = path.basename(csvFilePath);
 
         // --- Response --- 
-        // Send back the full list and the preview
         res.status(200).json({
             message: `File processed successfully (using ${extractionMethod}). Processed ${pagesTextArray.length} pages.`,
-            transactions: finalValidatedTransactions.slice(0, 5), // <-- Use FINAL validated data
-            fullTransactions: finalValidatedTransactions, // <-- Use FINAL validated data
-            totalTransactions: finalValidatedTransactions.length, // <-- Use FINAL validated data
+            // Send back the data including flags
+            transactions: finalTransactionDataForDb.slice(0, 5), 
+            fullTransactions: finalTransactionDataForDb, 
+            totalTransactions: finalTransactionDataForDb.length, 
             downloadId: downloadId,
             runId: runId // Include the run ID in the response
         });
