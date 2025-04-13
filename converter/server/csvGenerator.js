@@ -60,14 +60,11 @@ async function generateCsv(transactions, baseFileId) {
     // Generate CSV string
     let csvString;
     try {
-        csvString = stringify([headers, ...dataForCsv], { 
+        // Pass ONLY the data rows (array of arrays) 
+        // and specify the headers using the 'columns' option
+        csvString = stringify(dataForCsv, { 
             header: true, 
-            // Cast non-string types explicitly IF needed, though mapping to string above helps
-            // cast: {
-            //     date: (value) => value instanceof Date ? value.toISOString().split('T')[0] : value,
-            //     number: (value) => typeof value === 'number' ? String(value) : value,
-            //     boolean: (value) => typeof value === 'boolean' ? String(value) : value,
-            // }
+            columns: headers // Map the data arrays to these header columns
          }); 
     } catch (stringifyError) {
         console.error("Error during CSV stringification:", stringifyError);
