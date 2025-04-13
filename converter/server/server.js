@@ -237,20 +237,20 @@ function correctTransactionTypesByBalance(transactions) {
 
         // Check if balance difference matches the reported amount (positive or negative)
         if (Math.abs(balanceDiff - reportedAmount) <= BALANCE_TOLERANCE) {
-            // Balance decreased by amount - Should be Debit
-            if (currentTx.Credit !== null || isNaN(debitAmount)) { // Check if AI said Credit OR Debit was null/NaN
-                console.log(`[Balance Check] Correcting row ${i + 1} to DEBIT. Balance decreased.`);
-                currentTx.Debit = reportedAmount;
-                currentTx.Credit = null;
+            // Balance increased by amount - Should be CREDIT
+            if (currentTx.Debit !== null || isNaN(creditAmount)) { // Check if AI said Debit OR Credit was null/NaN
+                console.log(`[Balance Check] Correcting row ${i + 1} to CREDIT. Balance increased.`);
+                currentTx.Credit = reportedAmount;
+                currentTx.Debit = null;
                 currentTx.balanceCorrectedType = true;
                 correctionsMade++;
             }
         } else if (Math.abs(balanceDiff + reportedAmount) <= BALANCE_TOLERANCE) {
-             // Balance increased by amount - Should be Credit
-             if (currentTx.Debit !== null || isNaN(creditAmount)) { // Check if AI said Debit OR Credit was null/NaN
-                console.log(`[Balance Check] Correcting row ${i + 1} to CREDIT. Balance increased.`);
-                currentTx.Credit = reportedAmount;
-                currentTx.Debit = null;
+            // Balance decreased by amount - Should be DEBIT
+            if (currentTx.Credit !== null || isNaN(debitAmount)) { // Check if AI said Credit OR Debit was null/NaN
+                console.log(`[Balance Check] Correcting row ${i + 1} to DEBIT. Balance decreased.`);
+                currentTx.Debit = reportedAmount;
+                currentTx.Credit = null;
                 currentTx.balanceCorrectedType = true;
                 correctionsMade++;
             }
