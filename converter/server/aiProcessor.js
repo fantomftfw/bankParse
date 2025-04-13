@@ -180,7 +180,7 @@ function validateTransactionBalances(transactions) {
             continue; 
         }
 
-        // Calculate expected balance
+        // Calculate expected balance based on AI-reported type
         let expectedBalance;
         if (type === 'credit') {
             expectedBalance = prevBalance + amount;
@@ -190,20 +190,59 @@ function validateTransactionBalances(transactions) {
 
         // Check if the current balance matches the expected balance within tolerance
         const difference = Math.abs(currentBalance - expectedBalance);
+
         if (difference <= BALANCE_TOLERANCE) {
-            currentTxProcessed.balanceMismatch = false; 
+            // Balance matches the reported type
+            currentTxProcessed.balanceMismatch = false;
+            currentTxProcessed.typeCorrected = false; // Ensure flag is explicitly false
             processedTransactions.push(currentTxProcessed);
         } else {
-            // Balance mismatch - Log and flag
-            console.warn(`---> Balance mismatch detected at original index ${i}:
+            // Balance does NOT match the reported type. Try flipping the type.
+            const flippedType = (type === 'credit') ? 'debit' : 'credit';
+            let expectedBalanceIfTypeFlipped;
+            if (flippedType === 'credit') {
+                expectedBalanceIfTypeFlipped = prevBalance + amount;
+            } else { // flippedType === 'debit'
+                expectedBalanceIfTypeFlipped = prevBalance - amount;
+            }
+
+            const differenceIfFlipped = Math.abs(currentBalance - expectedBalanceIfTypeFlipped);
+
+            if (differenceIfFlipped <= BALANCE_TOLERANCE) {
+                // Flipping the type *does* match the balance. Correct it.
+                console.warn(`---> Correcting type at original index ${i}. Balance mismatch with reported type '${type}', but matches flipped type '${flippedType}'.\n  Prev Balance: ${prevBalance.toFixed(2)}, Amount: ${amount.toFixed(2)}, Actual Bal: ${currentBalance.toFixed(2)}`);
+                
+                currentTxProcessed.balanceMismatch = false;
+                currentTxProcessed.typeCorrected = true;
+
+                // Update Debit/Credit fields based on the *corrected* type
+                if (!isDefaultSchema) { // Only update Debit/Credit if using bank schema
+                    if (flippedType === 'credit') {
+                        currentTxProcessed.Credit = amount;
+                        currentTxProcessed.Debit = null;
+                    } else { // flippedType === 'debit'
+                        currentTxProcessed.Debit = amount;
+                        currentTxProcessed.Credit = null;
+                    }
+                } else {
+                     // If using default schema, update the 'type' field itself
+                     currentTxProcessed.type = flippedType;
+                }
+                processedTransactions.push(currentTxProcessed);
+
+            } else {
+                // Balance mismatch persists even after flipping type. Log the original mismatch.
+                 console.warn(`---> Balance mismatch detected at original index ${i} (Flip doesn't help):
   Prev Balance: ${prevBalance.toFixed(2)}
-  Current Tx:   Amount=${amount.toFixed(2)}, Type=${type}
+  Current Tx:   Amount=${amount.toFixed(2)}, Type=${type} (Reported by AI)
   Expected Bal: ${expectedBalance.toFixed(2)} (Diff: ${difference.toFixed(2)})
   Actual Bal:   ${currentBalance.toFixed(2)}
   Flagging transaction:`, currentTx);
-            currentTxProcessed.balanceMismatch = true; // Set flag
-            processedTransactions.push(currentTxProcessed);
-            mismatchCount++;
+                currentTxProcessed.balanceMismatch = true; // Keep flag
+                currentTxProcessed.typeCorrected = false; // Type was not corrected
+                processedTransactions.push(currentTxProcessed);
+                mismatchCount++;
+            }
         }
     }
 
