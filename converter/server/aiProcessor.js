@@ -278,11 +278,27 @@ function isValidTransaction(tx) {
     // Debit/Credit can be null, but not both for a real transaction (unless opening balance)
     const hasBankDebit = typeof tx.Debit === 'number' || tx.Debit === null;
     const hasBankCredit = typeof tx.Credit === 'number' || tx.Credit === null;
+    // Check for ICICI style debit/credit
+    const hasIciciWithdrawal = typeof tx['Withdrawal (Dr)'] === 'number' || tx['Withdrawal (Dr)'] === null;
+    const hasIciciDeposit = typeof tx['Deposit(Cr)'] === 'number' || tx['Deposit(Cr)'] === null;
+
     const hasBankBalance = typeof tx.Balance === 'number' && !isNaN(tx.Balance);
     // Check if it's likely an opening balance row which might lack Debit/Credit values initially
     const isLikelyOpeningBalance = (tx.Narration?.toUpperCase() === 'OPENING BALANCE' || tx['Transaction Remarks']?.toUpperCase() === 'OPENING BALANCE');
-    // A valid bank transaction row has date, narration, balance, and *either* a debit or credit value (or is opening balance)
-    const isValidBankTransaction = hasBankDate && hasBankNarration && hasBankBalance && (typeof tx.Debit === 'number' || typeof tx.Credit === 'number' || isLikelyOpeningBalance) && hasBankDebit && hasBankCredit;
+
+    // Check if *at least one* of the debit/credit fields (either style) has a numeric value
+    const hasNumericDebitOrCredit = 
+        (typeof tx.Debit === 'number' && !isNaN(tx.Debit)) || 
+        (typeof tx.Credit === 'number' && !isNaN(tx.Credit)) || 
+        (typeof tx['Withdrawal (Dr)'] === 'number' && !isNaN(tx['Withdrawal (Dr)'])) || 
+        (typeof tx['Deposit(Cr)'] === 'number' && !isNaN(tx['Deposit(Cr)']));
+
+    // A valid bank transaction row requires date, narration, balance,
+    // and *either* a valid set of debit/credit fields (Equitas style) OR (ICICI style)
+    // and *either* has a numeric debit/credit value OR is likely an opening balance.
+    const isValidBankTransaction = hasBankDate && hasBankNarration && hasBankBalance && 
+                                   ( (hasBankDebit && hasBankCredit) || (hasIciciWithdrawal && hasIciciDeposit) ) &&
+                                   ( hasNumericDebitOrCredit || isLikelyOpeningBalance );
 
     // Return true if it matches either schema
     return isDefaultSchema || isValidBankTransaction;
