@@ -23,10 +23,19 @@ function determineHeaders(transactions) {
     }
 
     // Get all unique keys from the first transaction object
-    const headers = Object.keys(transactions[0]);
+    const baseHeaders = Object.keys(transactions[0]);
 
-    console.log('Dynamically determined headers:', headers);
-    return headers;
+    // Ensure balance correction flags are always included if transactions exist
+    const finalHeaders = [...baseHeaders];
+    if (!finalHeaders.includes('balanceCorrectedType')) {
+        finalHeaders.push('balanceCorrectedType');
+    }
+    if (!finalHeaders.includes('balanceMismatch')) {
+        finalHeaders.push('balanceMismatch');
+    }
+
+    console.log('Dynamically determined headers (with flags):', finalHeaders);
+    return finalHeaders;
 }
 
 /**

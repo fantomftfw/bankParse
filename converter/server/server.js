@@ -153,6 +153,121 @@ async function getTextPerPage(dataBuffer) {
     }
 }
 
+// Tolerance for balance comparisons
+const BALANCE_TOLERANCE = 0.01; // Use a small tolerance for floating point comparisons
+
+/**
+ * Safely parses a currency string (potentially with commas) into a float.
+ * Returns NaN if parsing fails.
+ * @param {string|number|null|undefined} value The value to parse.
+ * @returns {number} The parsed float or NaN.
+ */
+function parseCurrency(value) {
+    if (value === null || value === undefined) return NaN;
+    if (typeof value === 'number') return value; // Already a number
+    if (typeof value !== 'string') return NaN;
+
+    const cleanedValue = value.replace(/[,]/g, ''); // Remove commas
+    // Add removal for currency symbols if needed: .replace(/[$,₹]/g, '')
+    
+    const number = parseFloat(cleanedValue);
+    return isNaN(number) ? NaN : number;
+}
+
+/**
+ * Corrects Debit/Credit classification based on running balance changes.
+ * Adds flags: `balanceCorrectedType` and `balanceMismatch`.
+ * Assumes transactions are chronologically sorted.
+ * @param {Array<object>} transactions Raw transactions from AI.
+ * @returns {Array<object>} Transactions with corrected types and flags.
+ */
+function correctTransactionTypesByBalance(transactions) {
+    if (!transactions || transactions.length < 2) {
+        // Cannot perform comparison with less than 2 transactions
+        // Add flags defaulting to false if desired for consistency
+        return transactions.map(tx => ({
+             ...tx, 
+             balanceCorrectedType: false,
+             balanceMismatch: false 
+            }));
+    }
+
+    console.log('[Balance Check] Starting balance correction...');
+    const correctedTransactions = [];
+    let correctionsMade = 0;
+    let mismatchesFound = 0;
+
+    // Add the first transaction - cannot be checked against a previous one
+    correctedTransactions.push({ 
+        ...transactions[0],
+        balanceCorrectedType: false,
+        balanceMismatch: false // Assume okay unless checks later prove otherwise
+    });
+
+    for (let i = 1; i < transactions.length; i++) {
+        const prevTx = correctedTransactions[i - 1]; // Use the potentially already corrected previous TX
+        const currentTx = { ...transactions[i], balanceCorrectedType: false, balanceMismatch: false }; // Start fresh flags
+
+        const prevBalance = parseCurrency(prevTx.Balance); // Assuming 'Balance' key from logs
+        const currentBalance = parseCurrency(currentTx.Balance);
+        const debitAmount = parseCurrency(currentTx.Debit);
+        const creditAmount = parseCurrency(currentTx.Credit);
+
+        // Determine the transaction amount reported by AI
+        let reportedAmount = NaN;
+        if (!isNaN(debitAmount) && debitAmount > 0) {
+            reportedAmount = debitAmount;
+        } else if (!isNaN(creditAmount) && creditAmount > 0) {
+            reportedAmount = creditAmount;
+        } else if (!isNaN(debitAmount) && debitAmount === 0 && isNaN(creditAmount)){
+             reportedAmount = 0; // Allow zero amount debits if credit is NaN/null
+        } else if (!isNaN(creditAmount) && creditAmount === 0 && isNaN(debitAmount)){
+             reportedAmount = 0; // Allow zero amount credits if debit is NaN/null
+        } // Note: Ignores rows where both are null/NaN/non-zero
+
+        if (isNaN(prevBalance) || isNaN(currentBalance) || isNaN(reportedAmount)) {
+            console.warn(`[Balance Check] Skipping check for row ${i + 1}: Unparseable numbers. PrevBal: ${prevTx.Balance}, CurrBal: ${currentTx.Balance}, Debit: ${currentTx.Debit}, Credit: ${currentTx.Credit}`);
+            currentTx.balanceMismatch = true; // Cannot validate
+            mismatchesFound++;
+            correctedTransactions.push(currentTx);
+            continue;
+        }
+
+        const balanceDiff = currentBalance - prevBalance;
+
+        // Check if balance difference matches the reported amount (positive or negative)
+        if (Math.abs(balanceDiff - reportedAmount) <= BALANCE_TOLERANCE) {
+            // Balance decreased by amount - Should be Debit
+            if (currentTx.Credit !== null || isNaN(debitAmount)) { // Check if AI said Credit OR Debit was null/NaN
+                console.log(`[Balance Check] Correcting row ${i + 1} to DEBIT. Balance decreased.`);
+                currentTx.Debit = reportedAmount;
+                currentTx.Credit = null;
+                currentTx.balanceCorrectedType = true;
+                correctionsMade++;
+            }
+        } else if (Math.abs(balanceDiff + reportedAmount) <= BALANCE_TOLERANCE) {
+             // Balance increased by amount - Should be Credit
+             if (currentTx.Debit !== null || isNaN(creditAmount)) { // Check if AI said Debit OR Credit was null/NaN
+                console.log(`[Balance Check] Correcting row ${i + 1} to CREDIT. Balance increased.`);
+                currentTx.Credit = reportedAmount;
+                currentTx.Debit = null;
+                currentTx.balanceCorrectedType = true;
+                correctionsMade++;
+            }
+        } else {
+            // Balance change does not match the reported amount
+            console.warn(`[Balance Check] Mismatch for row ${i + 1}. PrevBal: ${prevBalance.toFixed(2)}, CurrBal: ${currentBalance.toFixed(2)}, Diff: ${balanceDiff.toFixed(2)}, Amount: ${reportedAmount.toFixed(2)}`);
+            currentTx.balanceMismatch = true;
+            mismatchesFound++;
+        }
+
+        correctedTransactions.push(currentTx);
+    }
+
+    console.log(`[Balance Check] Finished. Corrections made: ${correctionsMade}, Mismatches found: ${mismatchesFound}.`);
+    return correctedTransactions;
+}
+
 // --- API Routes ---
 
 // Basic health check route
@@ -247,8 +362,14 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
              }
         }
 
-        // --- >>> REMOVED NORMALIZATION & VALIDATION STEPS <<< ---
-        const finalTransactionData = allRawTransactions; // Use the raw data directly
+        // --- >>> BALANCE CORRECTION STEP <<< ---
+        let finalTransactionData = [];
+        if (allRawTransactions.length > 0) {
+            finalTransactionData = correctTransactionTypesByBalance(allRawTransactions);
+        } else {
+            finalTransactionData = allRawTransactions; // Pass empty array if no raw txns
+        }
+        // --- >>> END BALANCE CORRECTION STEP <<< ---
 
         // --- Handle No Transactions Found --- 
         if (finalTransactionData.length === 0) {
