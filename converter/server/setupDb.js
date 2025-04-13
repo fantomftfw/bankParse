@@ -1,20 +1,20 @@
 const db = require('./db');
 
 // Define Prompts
-// Updated Default Prompt (Focuses on main table, dynamic schema)
+// Updated Default Prompt v3 (Stronger exclusion for summaries)
 const newDefaultPromptText = `
 Analyze the following bank statement text and extract data ONLY from the main, detailed transaction table.
-This table typically contains columns like "Date", "Value Date", "Transaction Details", "Narration", "Description", "Debit", "Withdrawal", "Credit", "Deposit", and "Balance".
+This table typically contains columns like "Date", "Value Date", "Transaction Details", "Narration", "Description", "Debit", "Withdrawal", "Credit", "Deposit", and "Balance", and often spans multiple pages or contains numerous rows.
 
 **CRITICAL INSTRUCTIONS:**
-1.  **Identify the Primary Transaction Table:** Locate the main table listing individual transaction events with corresponding dates, amounts, and balances. This is usually the largest table spanning multiple pages.
-2.  **Extract ONLY Transaction Rows:** Extract data *exclusively* from the rows within this identified primary transaction table.
-3.  **IGNORE Other Data:** Explicitly IGNORE summary tables (like "Account Summary", opening/closing balance summaries unless they are *rows within* the main table, totals sections, "Other Debits/Credits" summaries), page headers, page footers, account holder details, bank addresses, disclaimers, or any text clearly outside the main transaction table rows.
+1.  **Identify the Primary Transaction Table:** Locate the main table listing individual transaction events. This is usually the **largest table**, often spanning multiple pages, containing many rows detailing specific debits and credits.
+2.  **Extract ONLY Transaction Rows:** Extract data *exclusively* from the rows *within* this identified primary transaction table.
+3.  **IGNORE Other Data & Summaries:** Explicitly IGNORE summary sections or tables (like those titled "Account Summary", "Summary for Statement period", or any sections containing aggregated totals like "Other Debits", "Other Credits", "Total Debits/Credits"), page headers, page footers, account holder details, bank addresses, disclaimers, or any text clearly outside the main transaction table rows. If a section looks like a short summary with just a few aggregated totals, DO NOT extract from it.
 4.  **Match Column Headers Exactly:** Determine the exact column headers present *at the top of the identified primary transaction table*.
 5.  **Format as JSON Array:** Output the extracted data as a JSON array of objects.
 6.  **JSON Keys = Column Headers:** Each object in the array represents one transaction row from the main table. The keys within each JSON object MUST precisely match the column headers identified in step 4. Include all columns found in that specific table.
 7.  **Handle Multi-line Descriptions:** Combine multi-line descriptions or narrations within a single transaction row into a single string value for the relevant transaction detail key.
-8.  **Include Opening Balance Row:** If an "Opening Balance" entry exists as the first data row *within* the main transaction table structure (often having only a balance value), include it as the first object in the JSON array.
+8.  **Include Opening Balance Row:** If an "Opening Balance" entry exists as the first data row *within the structure* of the main transaction table (often having only a balance value), include it as the first object in the JSON array. Do *not* extract "Opening Balance" if it appears in a separate summary section.
 
 Text Content:
 --- START ---
@@ -73,55 +73,30 @@ Bank Statement Text:
 --- END ---
 `;
 
-// Define Equitas Prompt
+// Define Equitas Prompt (Updated to target main table, dynamic Equitas schema)
 const equitasPromptText = `
-Analyze the following bank statement text and extract all transaction details.
-Focus ONLY on rows representing individual transactions.
-Include the initial "Opening Balance" row if it appears as the first entry, even if Debit/Credit are zero or null.
-Ignore other summary lines, repeated headers, footers, or text outside the main transaction list.
-Format the output as a JSON array of objects. Each object MUST represent a single transaction
-and MUST contain the following keys EXACTLY, matching the structure of the Equitas statement:
-- "Transaction Date": The primary date of the transaction.
-- "Value Date": The value date if different from Transaction Date.
-- "Reference or cheque no": The reference or cheque number associated with the transaction (string or null).
-- "Narration": The full description or narration of the transaction (string).
-- "Debit": The amount debited (positive number or null if it's a credit).
-- "Credit": The amount credited (positive number or null if it's a debit).
-- "Balance": The account balance *after* this transaction (number).
+Analyze the following Equitas bank statement text and extract data ONLY from the main, detailed transaction table.
+This table typically contains columns like "Transaction Date", "Value Date", "Reference or cheque no", "Narration", "Debit", "Credit", and "Balance".
 
-Example object (adjust values as needed):
-{
-  "Transaction Date": "10/Apr/2024",
-  "Value Date": "10/Apr/2024",
-  "Reference or cheque no": "REF12345",
-  "Narration": "Online Purchase Amazon",
-  "Debit": 1500.50,
-  "Credit": null,
-  "Balance": 25000.75
-}
+**CRITICAL INSTRUCTIONS:**
+1.  **Identify the Primary Transaction Table:** Locate the main table listing individual transaction events with corresponding dates, amounts, and balances. This is usually the largest table spanning multiple pages.
+2.  **Extract ONLY Transaction Rows:** Extract data *exclusively* from the rows within this identified primary transaction table.
+3.  **IGNORE Other Data:** Explicitly IGNORE summary tables (like "Account Summary", opening/closing balance summaries unless they are *rows within* the main table, "Other Debits/Credits" summaries), page headers, page footers, account holder details, bank addresses, disclaimers, or any text clearly outside the main transaction table rows.
+4.  **Match Column Headers Exactly:** Determine the exact column headers present *at the top of the identified primary transaction table* (likely "Transaction Date", "Value Date", "Reference or cheque no", "Narration", "Debit", "Credit", "Balance").
+5.  **Format as JSON Array:** Output the extracted data as a JSON array of objects.
+6.  **JSON Keys = Column Headers:** Each object in the array represents one transaction row from the main table. The keys within each JSON object MUST precisely match the column headers identified in step 4.
+7.  **Handle Multi-line Narrations:** Combine multi-line narrations within a single transaction row into a single string value for the "Narration" key.
+8.  **Include Opening Balance Row:** If an "Opening Balance" entry exists as the first data row *within* the main transaction table structure (often having only a balance value), include it as the first object in the JSON array.
+9.  **Numeric Values:** Ensure all monetary values ("Debit", "Credit", "Balance") are represented strictly as numbers (e.g., 1234.56, not "1,234.56"). Remove commas.
+10. **Credit/Debit Exclusivity:** If "Debit" has a value, "Credit" MUST be null. If "Credit" has a value, "Debit" MUST be null.
+11. **CRITICAL Handling of Shared Refs:** Pay close attention to lines with the same date and "Reference or cheque no". If the "Narration" AND "Balance" change indicate distinct events (like interest credit followed by tax debit), treat them as **separate transactions** in the JSON output.
 
-// Example of handling separate transactions with the same reference:
-// If you see:
-// 18/Mar/2025 | REF999 | Interest Credit | null   | 50.00 | 10050.00
-// 18/Mar/2025 | REF999 | Tax Recovered   | 5.00   | null  | 10045.00
-// Output BOTH as separate objects:
-// {"Transaction Date": "18/Mar/2025", ..., "Narration": "Interest Credit", "Debit": null, "Credit": 50.00, "Balance": 10050.00},
-// {"Transaction Date": "18/Mar/2025", ..., "Narration": "Tax Recovered", "Debit": 5.00, "Credit": null, "Balance": 10045.00}
-
-IMPORTANT RULES:
-- Ensure all monetary values ("Debit", "Credit", "Balance") are represented strictly as numbers (e.g., 1234.56, not "1,234.56"). Remove any commas or currency symbols.
-- If a transaction is clearly a credit (money coming INTO the account, e.g., deposit, refund, received payment), the "Debit" value MUST be null.
-- If a transaction is clearly a debit (money going OUT of the account, e.g., purchase, withdrawal, payment sent), the "Credit" value MUST be null.
-- **PAYMENT CLARIFICATION:** Pay close attention to narrations containing "PAYMENT FROM...". If the narration indicates a "PAYMENT FROM" another person or entity (like PhonePe, Google Pay, another bank), it generally means *money received* by this account, so it should be a **CREDIT** (Debit is null). However, if the narration says "PAYMENT FROM" the *account holder's own name* or app associated with the account holder (e.g., "PAYMENT FROM PHONEPE" where PhonePe is linked to this account), it often means money *sent* from this account, making it a **DEBIT** (Credit is null). Analyze the context carefully.
-- **CRITICAL:** Pay close attention to lines with the same date and reference number. If the narration AND balance change indicate distinct events (like an interest credit followed immediately by a tax debit), you MUST treat them as **separate transactions** in the JSON output, even if the reference number is identical. Check the example above.
-- ONLY include rows that are clearly individual transactions. Do not include summaries.
-- Do NOT include any introductory text, explanations, or markdown fences (like \`\`\`json) in your response.
-- Provide ONLY the JSON array.
-
-Bank Statement Text:
+Text Content:
 --- START ---
 \${textContent}
 --- END ---
+
+JSON Output (Array of objects matching ONLY the main transaction table columns):
 `;
 
 const createTablesAndPrompts = async () => {
@@ -175,22 +150,27 @@ const createTablesAndPrompts = async () => {
       created_at = NOW();
   `; // Use ON CONFLICT...DO UPDATE to ensure the default prompt text is updated
 
-  // Insert ICICI Prompt
+  // Insert ICICI Prompt (Inactive)
   const insertIciciPrompt = `
     INSERT INTO Prompts (bank_identifier, prompt_text, is_default, is_active, version)
-    VALUES ('ICICI', $1, false, true, 1)
-    ON CONFLICT (bank_identifier) DO NOTHING;
-  `; // Use ON CONFLICT for ICICI
+    VALUES ('ICICI', $1, false, false, 1) -- Set is_active = false
+    ON CONFLICT (bank_identifier) DO UPDATE SET
+      prompt_text = EXCLUDED.prompt_text,
+      is_active = false, -- Ensure it stays inactive on update
+      version = Prompts.version + 1,
+      created_at = NOW();
+  `;
 
-  // Insert Equitas Prompt
+  // Insert Equitas Prompt (Inactive)
   const insertEquitasPrompt = `
     INSERT INTO Prompts (bank_identifier, prompt_text, is_default, is_active, version)
-    VALUES ('EQUITAS', $1, false, true, 1)
+    VALUES ('EQUITAS', $1, false, false, 1) -- Set is_active = false
     ON CONFLICT (bank_identifier) DO UPDATE SET 
       prompt_text = EXCLUDED.prompt_text,
+      is_active = false, -- Ensure it stays inactive on update
       version = Prompts.version + 1, 
       created_at = NOW();
-  `; // Modified ON CONFLICT to UPDATE
+  `;
 
   try {
     console.log('Creating uuid-ossp extension if not exists...');

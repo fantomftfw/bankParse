@@ -60,6 +60,30 @@ const safetySettings = [
 // Floating point tolerance for balance validation
 const BALANCE_TOLERANCE = 0.10; // Increased tolerance to 10 cents
 
+// --- Hardcoded Universal Prompt ---
+const UNIVERSAL_EXTRACTION_PROMPT = `
+Analyze the following bank statement text and extract data ONLY from the main, detailed transaction table.
+This table typically contains columns like "Date", "Value Date", "Transaction Details", "Narration", "Description", "Debit", "Withdrawal", "Credit", "Deposit", and "Balance", and often spans multiple pages or contains numerous rows.
+
+**CRITICAL INSTRUCTIONS:**
+1.  **Identify the Primary Transaction Table:** Locate the main table listing individual transaction events. This is usually the **largest table**, often spanning multiple pages, containing many rows detailing specific debits and credits.
+2.  **Extract ONLY Transaction Rows:** Extract data *exclusively* from the rows *within* this identified primary transaction table.
+3.  **IGNORE Other Data & Summaries:** Explicitly IGNORE summary sections or tables (like those titled "Account Summary", "Summary for Statement period", or any sections containing aggregated totals like "Other Debits", "Other Credits", "Total Debits/Credits"), page headers, page footers, account holder details, bank addresses, disclaimers, or any text clearly outside the main transaction table rows. If a section looks like a short summary with just a few aggregated totals, DO NOT extract from it.
+4.  **Match Column Headers Exactly:** Determine the exact column headers present *at the top of the identified primary transaction table*.
+5.  **Format as JSON Array:** Output the extracted data as a JSON array of objects.
+6.  **JSON Keys = Column Headers:** Each object in the array represents one transaction row from the main table. The keys within each JSON object MUST precisely match the column headers identified in step 4. Include all columns found in that specific table.
+7.  **Handle Multi-line Descriptions:** Combine multi-line descriptions or narrations within a single transaction row into a single string value for the relevant transaction detail key.
+8.  **Include Opening Balance Row:** If an "Opening Balance" entry exists as the first data row *within the structure* of the main transaction table (often having only a balance value), include it as the first object in the JSON array. Do *not* extract "Opening Balance" if it appears in a separate summary section.
+
+Text Content:
+--- START ---
+\${textContent}
+--- END ---
+
+JSON Output (Array of objects matching ONLY the main transaction table columns):
+`;
+// --- End Hardcoded Prompt ---
+
 // --- Helper Functions ---
 
 /**
@@ -388,45 +412,28 @@ async function identifyBankWithAI(textContent) {
 }
 
 /**
- * Extracts transactions using the default "dynamic schema" prompt.
- * The AI is expected to return a JSON array where object keys match PDF columns.
+ * Extracts transactions using the hardcoded universal prompt.
+ * The AI is expected to return a JSON array where object keys match PDF columns from the main table.
  * @param {string} textContent The text content from the PDF page.
- * @param {string|null} bankIdentifier The identified bank (logging only).
+ * @param {string|null} bankIdentifier The identified bank (logging only, not used for prompt selection).
  * @returns {Promise<Array<object>>} A promise resolving to the array of raw transaction objects.
  */
-async function extractTransactionsWithAI(textContent, bankIdentifier) {
-    const db = require('./db');
+async function extractTransactionsWithAI(textContent, bankIdentifier) { // bankIdentifier is now ignored for prompt logic
+    // Removed database prompt fetching logic
     let promptToUse = '';
-    let promptId = null;
-
-    // Fetch and prepare the default prompt (which now asks for dynamic schema)
-    try {
-        console.log(`[AI Extract] Fetching default prompt (Bank ID ${bankIdentifier || 'N/A'} ignored).`);
-        const promptResult = await db.query(
-            'SELECT id, prompt_text FROM Prompts WHERE is_default = true AND is_active = true ORDER BY version DESC LIMIT 1'
-        );
-        if (promptResult.rows.length > 0) {
-            promptToUse = promptResult.rows[0].prompt_text;
-            promptId = promptResult.rows[0].id;
-            console.log(`[AI Extract] Using default dynamic prompt ID: ${promptId}`);
-            promptToUse = promptToUse.replace(/\${textContent}/g, textContent);
-        } else {
-            console.error('[AI Extract] CRITICAL: No active default prompt found!');
-            throw new Error('No default extraction prompt found.');
-        }
-    } catch (dbError) {
-        console.error('[AI Extract] Error fetching prompt:', dbError);
-        throw new Error('Failed to retrieve extraction prompt.');
-    }
 
     if (!textContent) {
         console.warn("AI Processor: Received empty text content.");
         return [];
     }
 
+    // Use the hardcoded universal prompt
+    console.log(`[AI Extract] Using hardcoded universal prompt (Bank ID ${bankIdentifier || 'N/A'} ignored for prompt selection).`);
+    promptToUse = UNIVERSAL_EXTRACTION_PROMPT.replace(/\${textContent}/g, textContent);
+
     // Call the AI
     try {
-        console.log('[AI Extract] Sending request to Gemini AI (expecting dynamic schema)...');
+        console.log('[AI Extract] Sending request to Gemini AI (using hardcoded prompt)...');
         const result = await extractionModel.generateContent(promptToUse);
         const response = result.response;
         const jsonText = response.text();
