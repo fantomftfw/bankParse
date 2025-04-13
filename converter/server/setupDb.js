@@ -1,119 +1,27 @@
 const db = require('./db');
 
 // Define Prompts
+// Updated Default Prompt (Focuses on main table, dynamic schema)
 const newDefaultPromptText = `
-# Robust Gemini Prompt for Universal Bank Statement Processing
+Analyze the following bank statement text and extract data ONLY from the main, detailed transaction table.
+This table typically contains columns like "Date", "Value Date", "Transaction Details", "Narration", "Description", "Debit", "Withdrawal", "Credit", "Deposit", and "Balance".
 
-## Task Description
-You are a specialized financial data extraction system. Extract all banking transactions from the provided bank statement text, handling various formats, edge cases, and irregularities. Also identify opening and closing balances as separate entities. Output in structured JSON format.
+**CRITICAL INSTRUCTIONS:**
+1.  **Identify the Primary Transaction Table:** Locate the main table listing individual transaction events with corresponding dates, amounts, and balances. This is usually the largest table spanning multiple pages.
+2.  **Extract ONLY Transaction Rows:** Extract data *exclusively* from the rows within this identified primary transaction table.
+3.  **IGNORE Other Data:** Explicitly IGNORE summary tables (like "Account Summary", opening/closing balance summaries unless they are *rows within* the main table, totals sections, "Other Debits/Credits" summaries), page headers, page footers, account holder details, bank addresses, disclaimers, or any text clearly outside the main transaction table rows.
+4.  **Match Column Headers Exactly:** Determine the exact column headers present *at the top of the identified primary transaction table*.
+5.  **Format as JSON Array:** Output the extracted data as a JSON array of objects.
+6.  **JSON Keys = Column Headers:** Each object in the array represents one transaction row from the main table. The keys within each JSON object MUST precisely match the column headers identified in step 4. Include all columns found in that specific table.
+7.  **Handle Multi-line Descriptions:** Combine multi-line descriptions or narrations within a single transaction row into a single string value for the relevant transaction detail key.
+8.  **Include Opening Balance Row:** If an "Opening Balance" entry exists as the first data row *within* the main transaction table structure (often having only a balance value), include it as the first object in the JSON array.
 
-## Output Format
-Return a JSON object with two arrays:
-\`\`\`
-{
-  "transactions": [
-    {
-      "date": "YYYY-MM-DD",          // Standardized ISO date format
-      "description": "String",        // Full transaction description
-      "amount": 123.45,             // Numeric value without currency symbols (always positive)
-      "type": "credit|debit",       // Transaction type
-      "running_balance": 9876.54    // Numeric running balance *after* this transaction
-    },
-    // Additional transactions...
-  ],
-  "balances": [
-    {
-      "date": "YYYY-MM-DD",
-      "description": "String",        // E.g. "Opening Balance", "Closing Balance"
-      "amount": 123.45,
-      "balance_type": "opening|closing"
-    },
-    // Additional balance entries...
-  ]
-}
-\`\`\`
-
-## Processing Instructions
-
-### Transaction and Balance Identification
-1. Identify transactions by their distinctive patterns: date + description + monetary amount
-2. Identify opening/closing balances, usually at the beginning or end of statement
-3. Separate actual transactions (money in/out) from balance information
-4. Ensure each entry represents a SINGLE financial transaction or balance item
-
-### Date Handling
-1. Convert all dates to ISO format (YYYY-MM-DD)
-2. If dates use numeric formats (MM/DD/YYYY, DD-MM-YYYY, etc.), determine the format based on context
-3. For ambiguous dates, prefer the local date format convention inferred from other statement elements
-
-### Amount Processing
-1. Extract numeric values without currency symbols
-2. Represent amounts as positive numbers
-3. Use the "type" field to indicate debit (money out) or credit (money in)
-4. For records with amount in only one column (debit OR credit), determine the type accordingly
-5. For balance entries, include the full amount value
-6. For each entry in the "transactions" array, include the account's running balance *after* that specific transaction in the "running_balance" field. Ensure this is a numeric value.
-
-### Transaction Type Determination
-1. Mark "debit" for withdrawals, purchases, payments, fees, transfers out
-2. Mark "credit" for deposits, refunds, interest earned, transfers in
-3. Infer type from column positioning when not explicitly stated (left column often debits, right column often credits)
-4. Check for symbols (-, +) or terms ("DR", "CR") that may indicate transaction type
-5. For balance entries, use "opening" or "closing" as appropriate
-
-### Description Handling
-1. Capture the complete transaction description, including reference numbers
-2. Preserve merchant names, transaction IDs, and references
-3. Remove redundant information already captured in other fields
-4. Consolidate descriptions that span multiple lines or are split by formatting
-5. For balance entries, use clear descriptors like "Opening Balance" or "Closing Balance"
-
-## Edge Case Handling
-
-### Balance Entries
-1. INCLUDE account opening and closing balance records in "balances" array
-2. Associate each balance with appropriate type (opening/closing)
-3. Handle cases where balance information may not have a date
-4. Include running balance information in the "balances" array when present (Note: This conflicts slightly with point 6 under Amount Processing which asks for running balance *in* transactions. Transactions array is preferred for running balance).
-
-### Statement Structure Issues
-1. Ignore headers, footers, page numbers, and marketing content
-2. Properly reconnect transactions split across page breaks
-3. Treat account information sections correctly
-
-### Duplicate/Similar Transactions
-1. Include all transactions even if they share the same date and similar details
-2. Retain any distinguishing information in the description field
-3. For identical-looking transactions, include all distinct entries
-
-### Format Variations
-1. Handle tables with headers in different positions or formats
-2. Process both tabular and list-format statements
-3. Accommodate varying column orders across different statement styles
-
-### Character and Text Issues
-1. Handle special characters and symbols properly
-2. Account for OCR errors in scanned statements (common substitutions: O/0, l/I/1)
-3. Properly join hyphenated words split across lines
-
-## Final Verification
-Before returning results:
-1. Verify each transaction/balance has all required fields
-2. Confirm all dates are in valid ISO format
-3. Ensure amounts are numeric values
-4. Verify each transaction has exactly one type: "credit" or "debit"
-5. Verify each balance entry has a valid balance_type: "opening" or "closing"
-6. Remove any non-transaction, non-balance data
-
-## Important
-- Return ONLY the JSON object with the structure specified above
-- Do not include explanations, notes, or descriptions in your response
-- Focus on high-precision rather than recall - it's better to miss a transaction than include incorrect data
-
-Bank Statement Text:
+Text Content:
 --- START ---
 \${textContent}
 --- END ---
+
+JSON Output (Array of objects matching ONLY the main transaction table columns):
 `;
 
 const iciciPromptText = `
