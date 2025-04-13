@@ -304,19 +304,28 @@ async function extractTransactionsWithAI(textContent, bankIdentifier) {
             throw new Error(`Failed to parse AI response as JSON: ${parseError.message}`);
         }
 
-        // VALIDATE THE NEW TOP-LEVEL STRUCTURE
-        if (typeof parsedData !== 'object' || parsedData === null || !Array.isArray(parsedData.transactions) || !Array.isArray(parsedData.balances)) {
-             console.error("AI response was not the expected JSON object with 'transactions' and 'balances' arrays. Response:", parsedData);
+        // VALIDATE THE NEW TOP-LEVEL STRUCTURE -- MODIFIED TO BE FLEXIBLE
+        let transactions = [];
+        if (Array.isArray(parsedData)) {
+            // Handle direct array response (Equitas/ICICI prompt format)
+            console.log("AI response is a direct array. Assuming it contains transactions.");
+            transactions = parsedData;
+        } else if (typeof parsedData === 'object' && parsedData !== null && Array.isArray(parsedData.transactions)) {
+             // Handle object response with 'transactions' key (Default prompt format)
+             console.log("AI response is an object. Extracting 'transactions' array.");
+             transactions = parsedData.transactions;
+             // const balances = parsedData.balances; // Balances array is available if needed later
+        } else {
+            // If it's neither, it's an invalid structure
+             console.error("AI response was neither a direct array nor the expected JSON object with a 'transactions' array. Response:", parsedData);
              console.error("\n--- Raw AI response text (Invalid Structure) ---\n", jsonText, "\n---");
-            throw new Error('AI response did not match the expected {transactions: [], balances: []} structure.');
+             throw new Error('AI response did not match any expected structure (Array or {transactions: [...]}).');
         }
-
-        const transactions = parsedData.transactions; // Extract the transactions array
-        // const balances = parsedData.balances; // Balances array is available if needed later
+        // --- End Flexible Validation ---
 
         console.log(`AI successfully parsed ${transactions.length} potential transactions.`);
 
-        // Pass only the transactions array to the validation function
+        // Pass only the transactions array to the validation function - REMAINS THE SAME
         return transactions; 
 
     } catch (error) {
