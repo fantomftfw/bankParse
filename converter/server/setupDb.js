@@ -202,8 +202,9 @@ Example object (adjust values as needed):
 
 IMPORTANT RULES:
 - Ensure all monetary values ("Debit", "Credit", "Balance") are represented strictly as numbers (e.g., 1234.56, not "1,234.56"). Remove any commas or currency symbols.
-- If a transaction is clearly a credit, the "Debit" value MUST be null.
-- If a transaction is clearly a debit, the "Credit" value MUST be null.
+- If a transaction is clearly a credit (money coming INTO the account, e.g., deposit, refund, received payment), the "Debit" value MUST be null.
+- If a transaction is clearly a debit (money going OUT of the account, e.g., purchase, withdrawal, payment sent), the "Credit" value MUST be null.
+- **PAYMENT CLARIFICATION:** Pay close attention to narrations containing "PAYMENT FROM...". If the narration indicates a "PAYMENT FROM" another person or entity (like PhonePe, Google Pay, another bank), it generally means *money received* by this account, so it should be a **CREDIT** (Debit is null). However, if the narration says "PAYMENT FROM" the *account holder's own name* or app associated with the account holder (e.g., "PAYMENT FROM PHONEPE" where PhonePe is linked to this account), it often means money *sent* from this account, making it a **DEBIT** (Credit is null). Analyze the context carefully.
 - **CRITICAL:** Pay close attention to lines with the same date and reference number. If the narration AND balance change indicate distinct events (like an interest credit followed immediately by a tax debit), you MUST treat them as **separate transactions** in the JSON output, even if the reference number is identical. Check the example above.
 - ONLY include rows that are clearly individual transactions. Do not include summaries.
 - Do NOT include any introductory text, explanations, or markdown fences (like \`\`\`json) in your response.
@@ -277,8 +278,11 @@ const createTablesAndPrompts = async () => {
   const insertEquitasPrompt = `
     INSERT INTO Prompts (bank_identifier, prompt_text, is_default, is_active, version)
     VALUES ('EQUITAS', $1, false, true, 1)
-    ON CONFLICT (bank_identifier) DO NOTHING;
-  `; // Use ON CONFLICT for Equitas
+    ON CONFLICT (bank_identifier) DO UPDATE SET 
+      prompt_text = EXCLUDED.prompt_text,
+      version = Prompts.version + 1, 
+      created_at = NOW();
+  `; // Modified ON CONFLICT to UPDATE
 
   try {
     console.log('Creating uuid-ossp extension if not exists...');
