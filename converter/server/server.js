@@ -9,11 +9,11 @@ const db = require('./db'); // Import the db utility
 const { compareResults } = require('./feedbackAnalyzer'); // Import the analyzer
 
 // Import AI processing logic
-const { extractTransactionsWithAI, identifyBankWithAI, normalizeTransactionData, validateTransactionBalances } = require('./aiProcessor');
+const { extractTransactionsWithAI, identifyBankWithAI } = require('./aiProcessor'); // Removed normalize & validate
 // Import CSV generation logic
 const { generateCsv, csvExportsDir } = require('./csvGenerator'); // Import generateCsv
 // Import pattern extraction logic
-const { extractTransactionsWithPatterns } = require('./patternExtractor');
+const { extractTransactionsWithPatterns } = require('./patternExtractor'); // Keep for fallback?
 
 // TODO: Import processing logic controllers
 // TODO: Import Gemini AI client
@@ -160,8 +160,8 @@ app.get('/api/health', (req, res) => {
     res.status(200).json({ status: 'Server is running' });
 });
 
-// PDF Upload Route (Task 8)
-app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) => { // Make the handler async
+// PDF Upload Route
+app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) => {
     if (!req.file) {
         // This case should ideally be caught by Multer's error handler below,
         // but we keep it as a safeguard.
@@ -170,7 +170,7 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
     console.log('File uploaded:', req.file.path);
     console.log('Original filename:', req.file.originalname);
 
-    let allRawTransactions = [];
+    let allRawTransactions = []; // This will now hold the final data
     let extractionMethod = 'ai';
     let pagesTextArray = [];
     let identifiedBank = null;
@@ -191,9 +191,9 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
             console.log(`Identified Bank (or null): ${identifiedBank}`);
         }
 
-        console.log(`Processing ${pagesTextArray.length} pages with AI (using default prompt)...`);
+        console.log(`Processing ${pagesTextArray.length} pages with AI (using dynamic schema prompt)...`);
 
-        // --- Process each page with AI (using default prompt) ---
+        // --- Process each page with AI (using default dynamic prompt) ---
         for (let i = 0; i < pagesTextArray.length; i++) {
             const pageText = pagesTextArray[i];
             // --- Add logging for Page 1 Text Input ---
@@ -209,7 +209,7 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
             }
 
             try {
-                // Get RAW transactions (schema may vary)
+                // Get RAW transactions (schema should match PDF columns)
                 const rawTransactionsFromPage = await extractTransactionsWithAI(pageText, identifiedBank);
                 
                 if (rawTransactionsFromPage && rawTransactionsFromPage.length > 0) {
@@ -226,63 +226,41 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
         
         console.log(`Finished AI processing. Total raw transactions found: ${allRawTransactions.length}`);
 
-        // --- Fallback to Pattern Extraction ---
-        if (allRawTransactions.length === 0) {
+        // --- Fallback to Pattern Extraction --- 
+        // NOTE: Pattern fallback is unlikely to match the dynamic schema approach
+        // It might need removal or significant rework if kept.
+        if (allRawTransactions.length === 0 && extractionMethod !== 'pattern_fallback') {
              console.warn('AI extraction yielded zero raw transactions. Attempting pattern fallback...');
-             // Reread full text for fallback (consider efficiency later)
-             let fullPdfData = await pdf(dataBuffer); 
+             let fullPdfData = await pdf(dataBuffer);
              let fullPdfText = fullPdfData.text;
              try {
-                const patternTransactions = extractTransactionsWithPatterns(fullPdfText); // Get raw from pattern
+                const patternTransactions = extractTransactionsWithPatterns(fullPdfText);
                 if (patternTransactions && patternTransactions.length > 0) {
-                    allRawTransactions = patternTransactions; // Overwrite with pattern results if AI failed completely
+                    allRawTransactions = patternTransactions; // Use pattern results
                     extractionMethod = 'pattern_fallback';
-                    console.log(`Successfully extracted ${patternTransactions.length} raw transactions using pattern fallback.`);
+                    console.log(`Extracted ${patternTransactions.length} transactions using pattern fallback (NOTE: schema likely incorrect).`);
                 } else {
-                    console.warn('Pattern extraction fallback also returned no transactions.');
+                     console.warn('Pattern extraction fallback also returned no transactions.');
                 }
              } catch (patternError) {
                 console.error('Pattern extraction fallback failed:', patternError.message);
              }
         }
 
-        // --- >>> NORMALIZATION STEP <<< ---
-        console.log('Normalizing extracted raw transactions...');
-        const normalizedTransactions = normalizeTransactionData(allRawTransactions);
-        // --- >>> END NORMALIZATION STEP <<< ---
+        // --- >>> REMOVED NORMALIZATION & VALIDATION STEPS <<< ---
+        const finalTransactionData = allRawTransactions; // Use the raw data directly
 
-        // --- Handle No Transactions Found (After Normalization) ---
-        if (normalizedTransactions.length === 0) {
-             console.error('Failed to extract OR normalize any transactions.');
-             const errorMsg = allRawTransactions.length > 0
-                 ? 'Transactions extracted but failed normalization to standard schema.'
-                 : 'Could not extract transactions from the document after all attempts.';
+        // --- Handle No Transactions Found --- 
+        if (finalTransactionData.length === 0) {
+             console.error('No transactions extracted after AI and fallback attempts.');
              // Clean up uploaded file before sending error
              if (req.file && req.file.path) {
-                 fs.unlink(req.file.path, (err) => { if (err) console.error('Error deleting file on normalize fail:', err); });
+                 fs.unlink(req.file.path, (err) => { if (err) console.error('Error deleting file on no results:', err); });
              }
-             return res.status(400).json({ error: errorMsg });
+             return res.status(400).json({ error: 'Could not extract any transactions from the document.' });
         }
 
-        // --- Validate normalized transactions --- 
-        console.log('Validating normalized transactions...');
-        // Pass NORMALIZED data to validation
-        const validatedTransactionsWithFlags = validateTransactionBalances(normalizedTransactions);
-        
-        // Use the validated (and potentially type-corrected) data
-        const finalTransactionData = validatedTransactionsWithFlags;
-        
-        console.log(`Validation complete. Final transaction count for DB/CSV: ${finalTransactionData.length}`);
-        // Store validation flags raised for DB logging
-        const flagsRaised = finalTransactionData
-            .map((tx, index) => ({ // Map to keep track of original normalized index if needed
-                index: index, 
-                balanceMismatch: tx.balanceMismatch,
-                typeCorrected: tx.typeCorrected,
-                invalidStructure: tx.invalidStructure 
-            }))
-            .filter(f => f.balanceMismatch || f.typeCorrected || f.invalidStructure);
-        console.log(`${flagsRaised.length} flags raised during validation.`);
+        console.log(`Proceeding with ${finalTransactionData.length} raw transactions for DB/CSV.`);
 
         // --- Store result and get run ID --- 
         let runId = null;
@@ -294,27 +272,20 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
                     VALUES ($1, $2, $3, $4, $5)
                     RETURNING id;
                 `;
-                // Prepare data for DB - ensure it matches default schema
-                const dbReadyData = finalTransactionData.map(tx => ({
-                    date: tx.date,
-                    description: tx.description,
-                    amount: tx.amount,
-                    type: tx.type,
-                    running_balance: tx.running_balance,
-                    // Include flags directly if schema allows, or just store normalized data
-                }));
+                // Store the RAW AI result directly
+                // No flags are generated anymore by validation
                 const values = [
                     req.file.originalname, 
-                    JSON.stringify(dbReadyData), // Store NORMALIZED+VALIDATED data
-                    JSON.stringify(flagsRaised), // Store the flags separately
+                    JSON.stringify(finalTransactionData), // Store RAW AI output
+                    JSON.stringify([]), // No flags generated
                     'gemini-1.5-pro', 
-                    promptIdUsed // Store the ID of the default prompt used
+                    promptIdUsed // ID of the default prompt used
                 ];
                 
-                console.log('Storing processing result in database...');
+                console.log('Storing raw AI processing result in database...');
                 const dbResult = await db.query(insertQuery, values);
                 runId = dbResult.rows[0].id;
-                console.log(`Stored result with run_id: ${runId}`);
+                console.log(`Stored raw result with run_id: ${runId}`);
 
             } catch (dbError) {
                 console.error('Error saving processing result to database:', dbError);
@@ -322,16 +293,16 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
             }
         }
 
-        // --- CSV Generation (uses default schema headers) ---
+        // --- CSV Generation (handles dynamic headers) ---
         const baseFileId = path.basename(req.file.filename, path.extname(req.file.filename));
         const csvFilePath = await generateCsv(finalTransactionData, baseFileId); 
         const downloadId = path.basename(csvFilePath);
 
         // --- Response --- 
         res.status(200).json({
-            message: `File processed successfully using default prompt. Extracted ${allRawTransactions.length} raw transactions, resulted in ${finalTransactionData.length} processed transactions.`, // Updated message
-            transactions: finalTransactionData.slice(0, 5), // Preview normalized data
-            fullTransactions: finalTransactionData, // Send normalized+validated data
+            message: `File processed successfully using dynamic schema prompt. Extracted ${finalTransactionData.length} raw transactions.`, // Updated message
+            transactions: finalTransactionData.slice(0, 5), // Preview raw data
+            fullTransactions: finalTransactionData, // Send raw data
             totalTransactions: finalTransactionData.length, 
             downloadId: downloadId,
             runId: runId 

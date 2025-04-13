@@ -12,11 +12,12 @@ if (!API_KEY) {
 // Initialize the Generative AI client
 const genAI = new GoogleGenerativeAI(API_KEY);
 
-// Model for main transaction extraction (Pro recommended for accuracy)
+// Main model configuration (JSON output is preferred, but AI might override)
 const extractionModel = genAI.getGenerativeModel({
-    model: "gemini-1.5-pro", // Revert back to the stable Pro model
-    generationConfig: { responseMimeType: "application/json" },
-    safetySettings: [ // Configure safety settings
+    model: "gemini-1.5-pro",
+    // Request JSON, but be prepared to handle plain text/arrays if AI ignores
+    generationConfig: { responseMimeType: "application/json" }, 
+    safetySettings: [ 
         { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
         { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
         { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
@@ -24,11 +25,10 @@ const extractionModel = genAI.getGenerativeModel({
     ]
 });
 
-// Separate, faster model for bank identification
-const identificationModel = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash", // Use flash for speed
-    // No specific responseMimeType needed, expect simple text
-    safetySettings: [ // Configure safety settings
+// Model for bank identification (remains the same)
+const identificationModel = genAI.getGenerativeModel({ 
+    model: "gemini-1.5-flash",
+    safetySettings: [ 
         { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
         { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
         { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
@@ -388,37 +388,34 @@ async function identifyBankWithAI(textContent) {
 }
 
 /**
- * Extracts transactions from bank statement text using the Gemini AI API.
- * ALWAYS uses the default prompt. The response format might vary.
- * @param {string} textContent The text content extracted from the PDF bank statement page.
- * @param {string|null} bankIdentifier The identified bank (IGNORED for prompt selection, used for logging only).
- * @returns {Promise<Array<object>>} A promise that resolves to an array of RAW transaction objects (schema might vary).
- * @throws {Error} If AI processing fails or the response format is invalid.
+ * Extracts transactions using the default "dynamic schema" prompt.
+ * The AI is expected to return a JSON array where object keys match PDF columns.
+ * @param {string} textContent The text content from the PDF page.
+ * @param {string|null} bankIdentifier The identified bank (logging only).
+ * @returns {Promise<Array<object>>} A promise resolving to the array of raw transaction objects.
  */
-async function extractTransactionsWithAI(textContent, bankIdentifier) { // Removed type annotation
+async function extractTransactionsWithAI(textContent, bankIdentifier) {
     const db = require('./db');
     let promptToUse = '';
-    let promptId = null; // Changed type to any
+    let promptId = null;
 
+    // Fetch and prepare the default prompt (which now asks for dynamic schema)
     try {
-        // Fetch the DEFAULT prompt from the database
-        console.log(`[AI Extract] Fetching default prompt (Bank ID ${bankIdentifier || 'N/A'} ignored for prompt selection).`);
+        console.log(`[AI Extract] Fetching default prompt (Bank ID ${bankIdentifier || 'N/A'} ignored).`);
         const promptResult = await db.query(
             'SELECT id, prompt_text FROM Prompts WHERE is_default = true AND is_active = true ORDER BY version DESC LIMIT 1'
         );
-
         if (promptResult.rows.length > 0) {
             promptToUse = promptResult.rows[0].prompt_text;
             promptId = promptResult.rows[0].id;
-            console.log(`[AI Extract] Using default prompt ID: ${promptId}`);
-            promptToUse = promptToUse.replace(/\${textContent}/g, textContent); // Use regex replaceAll
+            console.log(`[AI Extract] Using default dynamic prompt ID: ${promptId}`);
+            promptToUse = promptToUse.replace(/\${textContent}/g, textContent);
         } else {
-            console.error('[AI Extract] CRITICAL: No active default prompt found in database!');
-            throw new Error('No suitable extraction prompt found.');
+            console.error('[AI Extract] CRITICAL: No active default prompt found!');
+            throw new Error('No default extraction prompt found.');
         }
-
     } catch (dbError) {
-        console.error('[AI Extract] Error fetching default prompt from database:', dbError);
+        console.error('[AI Extract] Error fetching prompt:', dbError);
         throw new Error('Failed to retrieve extraction prompt.');
     }
 
@@ -427,63 +424,61 @@ async function extractTransactionsWithAI(textContent, bankIdentifier) { // Remov
         return [];
     }
 
+    // Call the AI
     try {
-        console.log('[AI Extract] Sending request to Gemini AI (using default prompt)...');
+        console.log('[AI Extract] Sending request to Gemini AI (expecting dynamic schema)...');
         const result = await extractionModel.generateContent(promptToUse);
         const response = result.response;
         const jsonText = response.text();
 
         console.log("Received response from Gemini AI.");
-        console.log(`\n--- Raw AI Response (Length: ${jsonText?.length}) ---\n${jsonText}\n---\n`);
+        console.log(`\n--- Raw AI Response (Dynamic Schema) ---\n${jsonText}\n---\n`);
 
         if (!jsonText) {
              console.error("AI response text is empty.");
              throw new Error("AI returned an empty response.");
         }
 
+        // Attempt to parse the response as JSON
         let parsedData;
         try {
-            // Attempt to remove potential markdown fences before parsing
             const cleanedJsonText = jsonText.replace(/^```json\s*|```$/g, '').trim();
             parsedData = JSON.parse(cleanedJsonText);
         } catch (parseError) {
              console.error("Failed to parse AI JSON response:", parseError);
-             console.error("\n--- Raw AI response text (Failed Parse) ---\n", jsonText, "\n---");
+             console.error("Raw AI response text:", jsonText);
             throw new Error(`Failed to parse AI response as JSON: ${parseError.message}`);
         }
 
-
-        // --- Accept object OR array, extract transactions ---
-        let rawTransactions = []; // Default to empty array
-        if (typeof parsedData === 'object' && parsedData !== null && Array.isArray(parsedData.transactions)) {
-             // Default prompt structure: { transactions: [...] }
-             console.log("AI response is an object with 'transactions' key.");
-             rawTransactions = parsedData.transactions;
-        } else if (Array.isArray(parsedData)) {
-            // Bank-specific structure or AI returning array despite prompt: [...]
-             console.log("AI response is a direct array.");
-             rawTransactions = parsedData;
-        } else {
-            // Invalid structure
-             console.error("AI response was neither the expected object structure {transactions: [...]} nor a direct array. Response:", parsedData);
-             // Consider logging the raw text again if structure is unexpected
-             // console.error("\n--- Raw AI response text (Unexpected Structure) ---\n", jsonText, "\n---");
-             throw new Error('AI response did not match any expected structure.');
+        // Check if the result is an array (expected output now)
+        if (!Array.isArray(parsedData)) {
+            console.error("AI response was not the expected direct JSON array. Response type:", typeof parsedData);
+            // If it's an object with a 'transactions' key, maybe the *old* default prompt is still cached/active?
+            if (typeof parsedData === 'object' && parsedData !== null && Array.isArray(parsedData.transactions)) {
+                 console.warn("AI returned the OLD object structure {transactions: [...]}. Using that array, but the prompt might need updating in the DB!");
+                 parsedData = parsedData.transactions;
+            } else {
+                console.error("Raw AI response content:", parsedData);
+                throw new Error('AI response was not a JSON array as expected by the dynamic schema prompt.');
+            }
         }
-        // --- End response handling ---
 
-        console.log(`AI successfully parsed ${rawTransactions.length} potential raw transactions.`);
+        // Ensure all items in the array are objects
+        if (!parsedData.every(item => typeof item === 'object' && item !== null)) {
+            console.error("AI response array contains non-object items.");
+            throw new Error('AI response array contained invalid items.');
+        }
 
-        // Return the RAW transactions - normalization happens later
+        const rawTransactions = parsedData;
+        console.log(`AI successfully parsed ${rawTransactions.length} raw transactions (dynamic schema).`);
         return rawTransactions;
 
     } catch (error) {
-         console.error("Error during AI transaction processing:", error);
-         // Ensure error message includes specific cause if possible
+         console.error("Error during dynamic AI transaction processing:", error);
          const message = error instanceof Error ? error.message : String(error);
-         throw new Error(`Failed to process transactions with AI: ${message}`);
+         throw new Error(`Failed to process transactions with dynamic AI: ${message}`);
     }
 }
 
-// Export the necessary functions, including the new normalizer
-module.exports = { identifyBankWithAI, extractTransactionsWithAI, normalizeTransactionData, validateTransactionBalances }; 
+// Export only the necessary functions
+module.exports = { identifyBankWithAI, extractTransactionsWithAI }; 
