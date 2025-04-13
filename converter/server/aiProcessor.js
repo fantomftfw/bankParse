@@ -64,6 +64,7 @@ const BALANCE_TOLERANCE = 0.05;
 
 /**
  * Validates the sequence of transactions based on balance changes.
+ * Handles different transaction schemas dynamically.
  * Filters out transactions that result in inconsistent balances.
  * @param {Array<object>} transactions - Array of transaction objects from AI.
  * @returns {Array<object>} Filtered array of transactions with valid balance progression.
@@ -79,55 +80,82 @@ function validateTransactionBalances(transactions) {
     // Process the first transaction
     const firstTx = transactions[0];
     if (isValidTransaction(firstTx)) {
-         // Add balanceMismatch flag, default to false
-         processedTransactions.push({...firstTx, balanceMismatch: false});
+        // Add balanceMismatch flag, default to false
+        processedTransactions.push({ ...firstTx, balanceMismatch: false });
     } else {
-         console.warn("First transaction object is invalid:", firstTx);
-         // Optionally, push even invalid ones if needed, flagged
-         // processedTransactions.push({...firstTx, balanceMismatch: true, invalidStructure: true });
+        console.warn("First transaction object is invalid or doesn't match known schemas:", firstTx);
+        // Optionally push invalid ones flagged, but they won't be used for balance checks
+         processedTransactions.push({...firstTx, balanceMismatch: true, invalidStructure: true });
+         mismatchCount++; // Count it here
     }
 
-
     for (let i = 1; i < transactions.length; i++) {
-        // Compare against the *previous VALID transaction from the PROCESSED list*
-        const prevProcessedTx = processedTransactions[processedTransactions.length - 1]; // Get the last valid processed tx
         const currentTx = transactions[i];
-        let currentTxProcessed = {...currentTx, balanceMismatch: false}; // Assume valid first
+        let currentTxProcessed = { ...currentTx, balanceMismatch: false }; // Assume valid first
 
+        // Ensure the current transaction structure is valid before proceeding
         if (!isValidTransaction(currentTx)) {
-             console.warn(`Transaction at original index ${i} has invalid structure:`, currentTx);
-             // Don't push invalid ones to processed list if they break validation flow
-             // currentTxProcessed.balanceMismatch = true; // Mark as problematic
-             // currentTxProcessed.invalidStructure = true;
-             // processedTransactions.push(currentTxProcessed);
-             mismatchCount++; // Count structure issues as mismatches for logging
-             continue; // Move to next transaction
+            console.warn(`Transaction at original index ${i} has invalid structure or doesn't match known schemas:`, currentTx);
+             processedTransactions.push({...currentTxProcessed, balanceMismatch: true, invalidStructure: true }); // Add flagged invalid tx
+            mismatchCount++;
+            continue; // Move to next transaction
         }
 
-        // Ensure we have a valid previous transaction structure to compare against
-        if (!prevProcessedTx || !isValidTransaction(prevProcessedTx)) {
-            console.warn(`Cannot validate balance for transaction at original index ${i} because no valid previous transaction exists. Marking current as potential mismatch.`, currentTx);
+        // Find the *most recent previously processed transaction that IS valid*
+        const prevProcessedValidTx = processedTransactions.slice().reverse().find(tx => isValidTransaction(tx));
+
+        if (!prevProcessedValidTx) {
+            console.warn(`Cannot validate balance for transaction at original index ${i} because no valid previous transaction exists in processed list. Flagging current.`, currentTx);
             currentTxProcessed.balanceMismatch = true;
-            processedTransactions.push(currentTxProcessed); // Push even if prev invalid, but flag it
+            processedTransactions.push(currentTxProcessed);
             mismatchCount++;
             continue;
         }
 
-        // USE NEW FIELD NAMES
-        const prevBalance = parseFloat(prevProcessedTx.running_balance); 
-        const currentBalance = parseFloat(currentTxProcessed.running_balance);
-        const amount = parseFloat(currentTxProcessed.amount); // Amount is always positive
-        const type = currentTxProcessed.type; // "credit" or "debit"
+        // --- Dynamically determine keys based on schema ---
+        let prevBalance, currentBalance, amount, type;
+        let isDefaultSchema = prevProcessedValidTx.hasOwnProperty('running_balance'); // Check based on previous valid TX
+
+        if (isDefaultSchema) {
+            prevBalance = parseFloat(prevProcessedValidTx.running_balance);
+            currentBalance = parseFloat(currentTxProcessed.running_balance);
+            amount = parseFloat(currentTxProcessed.amount); // Amount is always positive in default schema
+            type = currentTxProcessed.type; // "credit" or "debit"
+        } else {
+            // Assume Bank Schema (Debit/Credit/Balance keys)
+            prevBalance = parseFloat(prevProcessedValidTx.Balance);
+            currentBalance = parseFloat(currentTxProcessed.Balance);
+            // Determine amount and type from Debit/Credit fields
+            const debitAmount = parseFloat(currentTxProcessed.Debit);
+            const creditAmount = parseFloat(currentTxProcessed.Credit);
+
+            if (!isNaN(debitAmount) && debitAmount > 0) {
+                amount = debitAmount;
+                type = 'debit';
+            } else if (!isNaN(creditAmount) && creditAmount > 0) {
+                amount = creditAmount;
+                type = 'credit';
+            } else {
+                // Handle case like opening balance or zero-value transaction
+                // If it's opening balance, it should have been handled by the first transaction logic
+                // If it's zero value, amount is 0. Let's assume credit type arbitrarily or check narration?
+                amount = 0;
+                type = 'credit'; // Or 'debit', shouldn't matter for balance check if amount is 0
+                 console.log(`Transaction at original index ${i} has zero or null Debit/Credit, assuming zero amount.`, currentTx);
+            }
+        }
+        // --- End dynamic key determination ---
+
 
         if (isNaN(prevBalance) || isNaN(currentBalance) || isNaN(amount) || (type !== 'credit' && type !== 'debit')) {
-            console.warn(`Skipping balance validation for transaction at original index ${i} due to non-numeric values or invalid type. Marking as potential mismatch:`, currentTx);
+            console.warn(`Skipping balance validation for transaction at original index ${i} due to non-numeric values or invalid type derived. Marking as potential mismatch:`, currentTx);
             currentTxProcessed.balanceMismatch = true; // Mark as problematic due to data issue
             processedTransactions.push(currentTxProcessed);
             mismatchCount++;
             continue; // Move to next transaction
         }
 
-        // CALCULATE EXPECTED BALANCE USING NEW FIELDS
+        // Calculate expected balance
         let expectedBalance;
         if (type === 'credit') {
             expectedBalance = prevBalance + amount;
@@ -137,22 +165,23 @@ function validateTransactionBalances(transactions) {
 
         // Check if the current balance matches the expected balance within tolerance
         if (Math.abs(currentBalance - expectedBalance) <= BALANCE_TOLERANCE) {
+             currentTxProcessed.balanceMismatch = false; // Explicitly set false
             processedTransactions.push(currentTxProcessed);
         } else {
             // Balance mismatch - Log and flag
             console.warn(`Balance mismatch at original index ${i}: Prev Bal: ${prevBalance}, Amount: ${amount}, Type: ${type}, Expected: ${expectedBalance.toFixed(2)}, Actual: ${currentBalance}. Flagging transaction:`, currentTx);
-                currentTxProcessed.balanceMismatch = true; // Set flag
-            // No correction attempt needed with this simpler structure
-                processedTransactions.push(currentTxProcessed);
-                mismatchCount++;
+            currentTxProcessed.balanceMismatch = true; // Set flag
+            processedTransactions.push(currentTxProcessed);
+            mismatchCount++;
         }
     }
 
     if (mismatchCount > 0) {
-         console.warn(`Flagged ${mismatchCount} transactions due to balance mismatches or structural issues (out of ${transactions.length} total received).`);
+        console.warn(`Flagged ${mismatchCount} transactions due to balance mismatches or structural issues (out of ${transactions.length} total received).`);
     }
 
-    return processedTransactions; // Return all transactions, with flags
+    // Return all transactions, including invalid ones that were flagged
+    return processedTransactions;
 }
 
 /**
@@ -163,13 +192,31 @@ function validateTransactionBalances(transactions) {
 function isValidTransaction(tx) {
     if (!tx || typeof tx !== 'object') return false;
 
-    const hasDate = typeof tx.date === 'string' && tx.date.length > 0; // Basic check
-    const hasDescription = typeof tx.description === 'string' && tx.description.length > 0;
-    const hasAmount = typeof tx.amount === 'number' && !isNaN(tx.amount);
-    const hasType = tx.type === 'credit' || tx.type === 'debit';
-    const hasRunningBalance = typeof tx.running_balance === 'number' && !isNaN(tx.running_balance);
+    // Check for default schema keys
+    const hasDefaultDate = typeof tx.date === 'string' && tx.date.length > 0;
+    const hasDefaultDescription = typeof tx.description === 'string'; // Allow empty description
+    const hasDefaultAmount = typeof tx.amount === 'number' && !isNaN(tx.amount);
+    const hasDefaultType = tx.type === 'credit' || tx.type === 'debit';
+    const hasDefaultRunningBalance = typeof tx.running_balance === 'number' && !isNaN(tx.running_balance);
+    const isDefaultSchema = hasDefaultDate && hasDefaultDescription && hasDefaultAmount && hasDefaultType && hasDefaultRunningBalance;
 
-    return hasDate && hasDescription && hasAmount && hasType && hasRunningBalance;
+    // Check for specific bank schema keys (e.g., Equitas/ICICI)
+    // Allow date to be potentially null if Value Date exists, but one must be string
+    const hasBankTxDate = typeof tx['Transaction Date'] === 'string' && tx['Transaction Date'].length > 0;
+    const hasBankValueDate = typeof tx['Value Date'] === 'string' && tx['Value Date'].length > 0;
+    const hasBankDate = hasBankTxDate || hasBankValueDate;
+    const hasBankNarration = typeof tx.Narration === 'string' || typeof tx['Transaction Remarks'] === 'string'; // Allow empty description
+    // Debit/Credit can be null, but not both for a real transaction (unless opening balance)
+    const hasBankDebit = typeof tx.Debit === 'number' || tx.Debit === null;
+    const hasBankCredit = typeof tx.Credit === 'number' || tx.Credit === null;
+    const hasBankBalance = typeof tx.Balance === 'number' && !isNaN(tx.Balance);
+    // Check if it's likely an opening balance row which might lack Debit/Credit values initially
+    const isLikelyOpeningBalance = (tx.Narration?.toUpperCase() === 'OPENING BALANCE' || tx['Transaction Remarks']?.toUpperCase() === 'OPENING BALANCE');
+    // A valid bank transaction row has date, narration, balance, and *either* a debit or credit value (or is opening balance)
+    const isValidBankTransaction = hasBankDate && hasBankNarration && hasBankBalance && (typeof tx.Debit === 'number' || typeof tx.Credit === 'number' || isLikelyOpeningBalance) && hasBankDebit && hasBankCredit;
+
+    // Return true if it matches either schema
+    return isDefaultSchema || isValidBankTransaction;
 }
 
 /**
