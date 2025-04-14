@@ -11,69 +11,64 @@ if (!fs.existsSync(csvExportsDir)) {
 }
 
 /**
- * Dynamically determines the CSV headers based on the keys of the first transaction object.
- * It ensures a consistent order and includes all unique keys found in the first object.
- * @param {Array<object>} transactions - Array of transaction objects (raw data from AI).
+ * Dynamically determines the CSV headers by finding all unique keys across ALL transactions.
+ * @param {Array<object>} transactions - Array of transaction objects.
  * @returns {Array<string>} An array of strings representing the headers.
  */
 function determineHeaders(transactions) {
-    if (!transactions || transactions.length === 0 || typeof transactions[0] !== 'object' || transactions[0] === null) {
-        console.warn('Cannot determine headers: Transactions array is empty or first item is not an object.');
-        return []; // Return empty if no data or invalid first transaction
+    if (!transactions || transactions.length === 0) {
+        console.warn('Cannot determine headers: Transactions array is empty.');
+        return [];
     }
 
-    // Get all unique keys from the first transaction object
-    const baseHeaders = Object.keys(transactions[0]);
+    const headerSet = new Set();
+    transactions.forEach(tx => {
+        if (typeof tx === 'object' && tx !== null) {
+            Object.keys(tx).forEach(key => headerSet.add(key));
+        }
+    });
 
     // Ensure balance correction flags are always included if transactions exist
-    const finalHeaders = [...baseHeaders];
-    if (!finalHeaders.includes('balanceCorrectedType')) {
-        finalHeaders.push('balanceCorrectedType');
+    // (They should be added during the loop above if present, but double-check)
+    if (!headerSet.has('balanceCorrectedType')) {
+        headerSet.add('balanceCorrectedType');
     }
-    if (!finalHeaders.includes('balanceMismatch')) {
-        finalHeaders.push('balanceMismatch');
+    if (!headerSet.has('balanceMismatch')) {
+        headerSet.add('balanceMismatch');
     }
 
-    console.log('Dynamically determined headers (with flags):', finalHeaders);
+    const finalHeaders = [...headerSet]; // Convert Set to Array
+    console.log('Dynamically determined headers (superset):', finalHeaders);
     return finalHeaders;
 }
 
 /**
- * Generates a CSV file from transaction data using dynamically determined headers.
- * @param {Array<object>} transactions - Array of transaction objects (raw data from AI).
+ * Generates a CSV file from transaction data using dynamically determined headers (superset).
+ * Passes the array of objects directly to csv-stringify.
+ * @param {Array<object>} transactions - Array of transaction objects (corrected data).
  * @param {string} baseFileId - Unique identifier for the output file.
  * @returns {Promise<string>} Path to the generated CSV file.
  * @throws {Error} If CSV generation fails.
  */
 async function generateCsv(transactions, baseFileId) {
-    const headers = determineHeaders(transactions);
+    const headers = determineHeaders(transactions); // Get superset of headers
 
     if (headers.length === 0) {
-        throw new Error('Cannot generate CSV: No headers could be determined.');
+        // If transactions existed but no headers (e.g., array of nulls), create default headers
+        if (transactions && transactions.length > 0){
+             console.warn("No headers determined from transaction objects, using default flags.");
+             headers.push('balanceCorrectedType', 'balanceMismatch');
+        } else {
+            throw new Error('Cannot generate CSV: No headers could be determined and no transactions.');
+        } 
     }
 
-    // Map data to the dynamic headers
-    const dataForCsv = transactions.map(tx => {
-        if (typeof tx !== 'object' || tx === null) {
-            console.warn('Skipping non-object item in transactions array during CSV mapping.');
-            return headers.map(() => ''); // Return empty cells for invalid row
-        }
-        // For each header, get the corresponding value from the transaction object
-        return headers.map(header => {
-            const value = tx[header];
-            // Return the value if it exists, otherwise return an empty string
-            return (value !== undefined && value !== null) ? String(value) : ''; 
-        });
-    });
-
-    // Generate CSV string
+    // Generate CSV string directly from the array of objects
     let csvString;
     try {
-        // Pass ONLY the data rows (array of arrays) 
-        // and specify the headers using the 'columns' option
-        csvString = stringify(dataForCsv, { 
+        csvString = stringify(transactions, { // Pass array of objects
             header: true, 
-            columns: headers // Map the data arrays to these header columns
+            columns: headers // Use the determined superset of columns
          }); 
     } catch (stringifyError) {
         console.error("Error during CSV stringification:", stringifyError);
@@ -86,7 +81,7 @@ async function generateCsv(transactions, baseFileId) {
     const filePath = path.join(csvExportsDir, outputFileName);
 
     try {
-        fs.writeFileSync(filePath, csvString); // Use sync for simplicity in this context
+        fs.writeFileSync(filePath, csvString); 
         console.log(`CSV file generated successfully: ${filePath}`);
         return filePath; 
     } catch (writeError) {
