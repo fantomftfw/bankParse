@@ -395,28 +395,7 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
         
         console.log(`Finished AI processing. Total raw transactions found: ${allRawTransactions.length}`);
 
-        // --- Fallback to Pattern Extraction --- 
-        // NOTE: Pattern fallback is unlikely to match the dynamic schema approach
-        // It might need removal or significant rework if kept.
-        if (allRawTransactions.length === 0 && extractionMethod !== 'pattern_fallback') {
-             console.warn('AI extraction yielded zero raw transactions. Attempting pattern fallback...');
-             let fullPdfData = await pdf(dataBuffer);
-             let fullPdfText = fullPdfData.text;
-             try {
-                const patternTransactions = extractTransactionsWithPatterns(fullPdfText);
-                if (patternTransactions && patternTransactions.length > 0) {
-                    allRawTransactions = patternTransactions; // Use pattern results
-                    extractionMethod = 'pattern_fallback';
-                    console.log(`Extracted ${patternTransactions.length} transactions using pattern fallback (NOTE: schema likely incorrect).`);
-                } else {
-                     console.warn('Pattern extraction fallback also returned no transactions.');
-                }
-             } catch (patternError) {
-                console.error('Pattern extraction fallback failed:', patternError.message);
-             }
-        }
-
-        // --- >>> BALANCE CORRECTION STEP <<< ---
+        // --- >>> BALANCE CORRECTION STEP (operates on cleaned keys) <<< ---
         let finalTransactionData = [];
         if (allRawTransactions.length > 0) {
             finalTransactionData = correctTransactionTypesByBalance(allRawTransactions);
@@ -424,6 +403,10 @@ app.post('/api/upload', upload.single('bankStatement'), async (req, res, next) =
             finalTransactionData = allRawTransactions; // Pass empty array if no raw txns
         }
         // --- >>> END BALANCE CORRECTION STEP <<< ---
+
+        // --- >>> LOG FINAL DATA BEFORE CSV <<< ---
+        console.log('[Pre-CSV Log] Final data being sent to CSV generator:', JSON.stringify(finalTransactionData, null, 2));
+        // --- >>> END LOG <<< ---
 
         // --- Handle No Transactions Found --- 
         if (finalTransactionData.length === 0) {
