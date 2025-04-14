@@ -89,6 +89,8 @@ async function generateCsv(transactions, baseFileId) {
         return headers.map(header => getValueForCanonicalHeader(tx, header));
     });
 
+    console.log('Mapped data for CSV (Array of Arrays):\n', JSON.stringify(dataForCsv, null, 2));
+
     // Generate CSV string from the array of arrays
     let csvString;
     try {
@@ -96,6 +98,7 @@ async function generateCsv(transactions, baseFileId) {
             header: true, 
             columns: headers // Specify the headers explicitly
          }); 
+        console.log('Generated CSV String (before write):\n', csvString);
     } catch (stringifyError) {
         console.error("Error during CSV stringification:", stringifyError);
         throw new Error(`Failed to stringify data to CSV: ${stringifyError.message}`);
