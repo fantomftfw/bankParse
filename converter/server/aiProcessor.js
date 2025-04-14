@@ -63,7 +63,7 @@ const BALANCE_TOLERANCE = 0.10; // Increased tolerance to 10 cents
 // --- Hardcoded Universal Prompt ---
 const UNIVERSAL_EXTRACTION_PROMPT = `
 Analyze the following bank statement text and extract data ONLY from the main, detailed transaction table.
-This table typically contains columns like "Date", "Value Date", "Transaction Details", "Narration", "Description", "Debit", "Withdrawal", "Credit", "Deposit", and "Balance", and often spans multiple pages or contains numerous rows.
+This table typically contains columns representing: Date, Transaction Details/Narration/Description, Debit/Withdrawal/Money Out, Credit/Deposit/Money In, and Balance. Column names may vary; identify them based on context and content. The table often spans multiple pages or contains numerous rows.
 
 **CRITICAL INSTRUCTIONS:**
 1.  **Identify the Primary Transaction Table:** Locate the main table listing individual transaction events. This is usually the **largest table**, often spanning multiple pages, containing many rows detailing specific debits and credits.
@@ -72,8 +72,9 @@ This table typically contains columns like "Date", "Value Date", "Transaction De
 4.  **Match Column Headers Exactly:** Determine the exact column headers present *at the top of the identified primary transaction table*.
 5.  **Format as JSON Array:** Output the extracted data as a JSON array of objects.
 6.  **JSON Keys = Column Headers:** Each object in the array represents one transaction row from the main table. The keys within each JSON object MUST precisely match the column headers identified in step 4. Include all columns found in that specific table.
-7.  **Handle Multi-line Descriptions:** Combine multi-line descriptions or narrations within a single transaction row into a single string value for the relevant transaction detail key.
+7.  **Handle Multi-line Descriptions:** Combine multi-line descriptions, narrations, or transaction details within a single transaction row into a single string value for the relevant key.
 8.  **Include Opening Balance Row:** If an "Opening Balance" entry exists as the first data row *within the structure* of the main transaction table (often having only a balance value), include it as the first object in the JSON array. Do *not* extract "Opening Balance" if it appears in a separate summary section.
+9.  **Synonym Awareness:** Be aware that headers for debit amounts might be "Debit", "Withdrawal", "Ausgabe", "Money Out", etc. Headers for credit amounts might be "Credit", "Deposit", "Eingang", "Money In", etc. Use the actual header from the table as the JSON key.
 
 Text Content:
 --- START ---
