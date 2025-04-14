@@ -264,29 +264,34 @@ function correctTransactionTypesByBalance(transactions) {
         const currentTx = { ...transactions[i], balanceCorrectedType: false, balanceMismatch: false }; 
 
         // Use globally found dynamic keys
+        const debitValue = currentTx[debitKey]; // Raw value
+        const creditValue = currentTx[creditKey]; // Raw value
+
+        // Determine the ACTUAL non-null amount value reported by AI FIRST
+        let rawReportedValue = null;
+        if (debitValue !== null && debitValue !== undefined) {
+            rawReportedValue = debitValue;
+        } else if (creditValue !== null && creditValue !== undefined) {
+            rawReportedValue = creditValue;
+        } else {
+             // Neither key has a value, maybe it's a zero-value txn? Check if keys *exist*
+             if (Object.hasOwnProperty.call(currentTx, debitKey) || Object.hasOwnProperty.call(currentTx, creditKey)) {
+                 rawReportedValue = '0'; // Treat as zero if keys exist but values are null/undefined
+             }
+        }
+        
+        // NOW parse the balances and the identified reported amount
         const prevBalance = parseCurrency(prevTx[balanceKey]);
         const currentBalance = parseCurrency(currentTx[balanceKey]);
-        // Important: Use || 0 to handle cases where AI might return null/undefined for the correct key
-        const debitAmount = parseCurrency(currentTx[debitKey] || 0);
-        const creditAmount = parseCurrency(currentTx[creditKey] || 0);
+        const reportedAmount = parseCurrency(rawReportedValue);
 
-        // Determine the transaction amount reported by AI (handle potential zero values correctly)
-        let reportedAmount = NaN;
-        if (!isNaN(debitAmount) && debitAmount !== 0) {
-            reportedAmount = debitAmount;
-        } else if (!isNaN(creditAmount) && creditAmount !== 0) {
-            reportedAmount = creditAmount;
-        } else if (!isNaN(debitAmount) && !isNaN(creditAmount) && debitAmount === 0 && creditAmount === 0) {
-            reportedAmount = 0; // Both are zero
-        } else if (!isNaN(debitAmount) && debitAmount === 0 && isNaN(creditAmount)) {
-            reportedAmount = 0; // Debit is zero, Credit is missing
-        } else if (!isNaN(creditAmount) && creditAmount === 0 && isNaN(debitAmount)) {
-            reportedAmount = 0; // Credit is zero, Debit is missing
-        } // Leaves reportedAmount as NaN if only one exists and it's zero, or if both are NaN
+        // Use the PARSED debit/credit amounts ONLY for the check inside the correction block
+        const parsedDebitAmount = parseCurrency(debitValue);
+        const parsedCreditAmount = parseCurrency(creditValue);
 
         if (isNaN(prevBalance) || isNaN(currentBalance) || isNaN(reportedAmount)) {
-            // Use dynamic keys in the log message
-            console.warn(`[Balance Check] Skipping check for row ${i + 1}: Unparseable numbers. PrevBal: ${prevTx[balanceKey]}, CurrBal: ${currentTx[balanceKey]}, DebitKey ('${debitKey}'): ${currentTx[debitKey]}, CreditKey ('${creditKey}'): ${currentTx[creditKey]}`);
+            // Log the raw values for better debugging
+            console.warn(`[Balance Check] Skipping check for row ${i + 1}: Unparseable numbers. PrevBal: ${prevTx[balanceKey]}, CurrBal: ${currentTx[balanceKey]}, RawDebit: ${debitValue}, RawCredit: ${creditValue}, RawReported: ${rawReportedValue}`);
             currentTx.balanceMismatch = true; 
             mismatchesFound++;
             correctedTransactions.push(currentTx);
@@ -298,18 +303,20 @@ function correctTransactionTypesByBalance(transactions) {
         // Check if balance difference matches the reported amount
         if (Math.abs(balanceDiff - reportedAmount) <= BALANCE_TOLERANCE) {
             // Balance increased by amount - Should be CREDIT
-            if (currentTx[debitKey] !== null || isNaN(creditAmount)) { 
+            // Check if correction is needed (AI reported Debit or Credit was missing/NaN)
+            if (debitValue !== null || isNaN(parsedCreditAmount)) { 
                 console.log(`[Balance Check] Correcting row ${i + 1} to CREDIT. Balance increased.`); 
-                currentTx[creditKey] = reportedAmount; 
+                currentTx[creditKey] = reportedAmount; // Use the definitive amount 
                 currentTx[debitKey] = null;          
                 currentTx.balanceCorrectedType = true;
                 correctionsMade++;
             }
         } else if (Math.abs(balanceDiff + reportedAmount) <= BALANCE_TOLERANCE) {
             // Balance decreased by amount - Should be DEBIT
-            if (currentTx[creditKey] !== null || isNaN(debitAmount)) { 
+             // Check if correction is needed (AI reported Credit or Debit was missing/NaN)
+            if (creditValue !== null || isNaN(parsedDebitAmount)) { 
                 console.log(`[Balance Check] Correcting row ${i + 1} to DEBIT. Balance decreased.`); 
-                currentTx[debitKey] = reportedAmount;  
+                currentTx[debitKey] = reportedAmount; // Use the definitive amount 
                 currentTx[creditKey] = null;         
                 currentTx.balanceCorrectedType = true;
                 correctionsMade++;
