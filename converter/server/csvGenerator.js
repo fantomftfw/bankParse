@@ -10,65 +10,91 @@ if (!fs.existsSync(csvExportsDir)) {
     console.log(`Created CSV export directory: ${csvExportsDir}`);
 }
 
+// Define the desired canonical headers for the final CSV output
+const CANONICAL_HEADERS = [
+    'Sl No', 
+    'Tran Id', 
+    'Value Date', 
+    'Transaction Date', 
+    'Transaction Posted Date', 
+    'Cheque no / Ref No', 
+    'Transaction Remarks', // Preferred Description Key 
+    'Debit', // Preferred Debit Key
+    'Credit', // Preferred Credit Key
+    'Balance', 
+    'balanceCorrectedType', 
+    'balanceMismatch'
+];
+
+// Mapping from canonical headers to potential keys found in data
+// (Case-insensitive matching will be used in retrieval)
+const KEY_MAPPINGS = {
+    'Sl No': ['Sl No'],
+    'Tran Id': ['Tran Id'],
+    'Value Date': ['Value Date'],
+    'Transaction Date': ['Transaction Date', 'Date'], // Add 'Date' as fallback
+    'Transaction Posted Date': ['Transaction Posted Date'],
+    'Cheque no / Ref No': ['Cheque no / Ref No', 'Reference or cheque no'], // Add Equitas variant
+    'Transaction Remarks': ['Transaction Remarks', 'Narration', 'Transaction details', 'Transaction Details/Narration/Description'], // Add variants
+    'Debit': ['Debit', 'Withdra wal (Dr)'], // Add ICICI variant (cleaned)
+    'Credit': ['Credit', 'Deposit (Cr)'], // Add ICICI variant (cleaned)
+    'Balance': ['Balance'],
+    'balanceCorrectedType': ['balanceCorrectedType'],
+    'balanceMismatch': ['balanceMismatch'],
+};
+
 /**
- * Dynamically determines the CSV headers by finding all unique keys across ALL transactions.
- * @param {Array<object>} transactions - Array of transaction objects.
- * @returns {Array<string>} An array of strings representing the headers.
+ * Gets the value from a transaction object for a canonical header concept,
+ * trying a predefined list of potential keys.
+ * Returns the value of the first matching key found, or empty string.
+ * @param {object} tx - The transaction object.
+ * @param {string} canonicalHeader - The desired header concept (e.g., 'Debit').
+ * @returns {string}
  */
-function determineHeaders(transactions) {
-    if (!transactions || transactions.length === 0) {
-        console.warn('Cannot determine headers: Transactions array is empty.');
-        return [];
-    }
-
-    const headerSet = new Set();
-    transactions.forEach(tx => {
-        if (typeof tx === 'object' && tx !== null) {
-            Object.keys(tx).forEach(key => headerSet.add(key));
+function getValueForCanonicalHeader(tx, canonicalHeader) {
+    const potentialKeys = KEY_MAPPINGS[canonicalHeader] || [canonicalHeader]; // Fallback to header itself
+    for (const key of potentialKeys) {
+        // Check if the key exists in the object (case-sensitive for direct access)
+        if (tx[key] !== undefined && tx[key] !== null) {
+            return String(tx[key]); // Convert to string for CSV
         }
-    });
-
-    // Ensure balance correction flags are always included if transactions exist
-    // (They should be added during the loop above if present, but double-check)
-    if (!headerSet.has('balanceCorrectedType')) {
-        headerSet.add('balanceCorrectedType');
     }
-    if (!headerSet.has('balanceMismatch')) {
-        headerSet.add('balanceMismatch');
-    }
-
-    const finalHeaders = [...headerSet]; // Convert Set to Array
-    console.log('Dynamically determined headers (superset):', finalHeaders);
-    return finalHeaders;
+    return ''; // Return empty string if no key matched or value was null/undefined
 }
 
 /**
- * Generates a CSV file from transaction data using dynamically determined headers (superset).
- * Passes the array of objects directly to csv-stringify.
+ * Generates a CSV file from transaction data using canonical headers.
+ * Maps data to a consistent array structure before stringifying.
  * @param {Array<object>} transactions - Array of transaction objects (corrected data).
  * @param {string} baseFileId - Unique identifier for the output file.
  * @returns {Promise<string>} Path to the generated CSV file.
  * @throws {Error} If CSV generation fails.
  */
 async function generateCsv(transactions, baseFileId) {
-    const headers = determineHeaders(transactions); // Get superset of headers
+    
+    const headers = CANONICAL_HEADERS; // Use the predefined canonical headers
+    console.log('Using Canonical Headers for CSV:', headers);
 
-    if (headers.length === 0) {
-        // If transactions existed but no headers (e.g., array of nulls), create default headers
-        if (transactions && transactions.length > 0){
-             console.warn("No headers determined from transaction objects, using default flags.");
-             headers.push('balanceCorrectedType', 'balanceMismatch');
-        } else {
-            throw new Error('Cannot generate CSV: No headers could be determined and no transactions.');
-        } 
+    if (!transactions) {
+        console.warn('generateCsv called with null/undefined transactions array.');
+        transactions = []; // Ensure it's an array
     }
 
-    // Generate CSV string directly from the array of objects
+    // Map transaction objects to arrays matching canonical header order
+    const dataForCsv = transactions.map(tx => {
+        if (typeof tx !== 'object' || tx === null) {
+            console.warn('Skipping non-object item in transactions array during CSV mapping.');
+            return headers.map(() => ''); // Return empty cells for invalid row
+        }
+        return headers.map(header => getValueForCanonicalHeader(tx, header));
+    });
+
+    // Generate CSV string from the array of arrays
     let csvString;
     try {
-        csvString = stringify(transactions, { // Pass array of objects
+        csvString = stringify(dataForCsv, { // Pass array of arrays
             header: true, 
-            columns: headers // Use the determined superset of columns
+            columns: headers // Specify the headers explicitly
          }); 
     } catch (stringifyError) {
         console.error("Error during CSV stringification:", stringifyError);
@@ -90,5 +116,6 @@ async function generateCsv(transactions, baseFileId) {
     }
 }
 
-// Export the necessary functions
-module.exports = { generateCsv, determineHeaders, csvExportsDir }; 
+// Export only generateCsv and the directory path
+// determineHeaders is no longer needed externally with this approach
+module.exports = { generateCsv, csvExportsDir }; 
